@@ -1,0 +1,35 @@
+# Ignore files for convenience. Use `git add -f <files>` to force include necessary files.
+
+# Dependencies
+include/*
+lib/*
+lib64/*
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Intermediate build results
+*.a
+*.so
+
+# CLion
+.idea/
+*.cbp
+
+# Visual Studio build files
+build/**/.vs
+build/**/*.user
+build/**/Debug
+build/**/Release
+build/**/Win32
+build/**/x64
+
+# Visual Studio performance sessions
+*.psess
+*.vspx
+
+# Release directory
+release/*

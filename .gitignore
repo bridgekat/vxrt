@@ -31,5 +31,10 @@ build/**/x64
 *.psess
 *.vspx
 
+# Dev-C++ build files
+build/devcpp/*.layout
+build/devcpp/*.win
+build/devcpp/obj
+
 # Release directory
 release/*

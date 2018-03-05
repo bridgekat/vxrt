@@ -1,6 +1,7 @@
 #include "config.h"
 #include "window.h"
 #include "renderer.h"
+#include "vertexarray.h"
 
 int main(){
 	Config::load();
@@ -13,11 +14,27 @@ int main(){
 	}
 	
 	Renderer::init();
-	Renderer::setClearColor(Vec3f(1.0f, 1.0f, 1.0f));
 	
 	while (!win.shouldQuit()) {
 		win.swapBuffers();
+		
+		Renderer::setViewport(0, 0, win.getWidth(), win.getHeight());
 		Renderer::clear();
+		
+		Renderer::beginFinalPass();
+		Renderer::restoreProjection();
+		Renderer::restoreModelview();
+		
+		VertexArray va(6, VertexFormat(0, 0, 0, 2));
+		va.addVertex({-1.0f, 1.0f});
+		va.addVertex({-1.0f,-1.0f});
+		va.addVertex({ 1.0f, 1.0f});
+		va.addVertex({ 1.0f, 1.0f});
+		va.addVertex({-1.0f,-1.0f});
+		va.addVertex({ 1.0f,-1.0f});
+		VertexBuffer(va, false).render();
+		
+		Renderer::endFinalPass();
 		
 		win.pollEvents();
 	}

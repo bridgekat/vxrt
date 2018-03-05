@@ -81,7 +81,7 @@ public:
 	// Add vertex
 	void addVertex(const float* coords) {
 		auto cnt = mFormat.textureCount + mFormat.colorCount + mFormat.normalCount;
-		Assert(mVertexes * mFormat.vertexAttributeCount + cnt + 3 <= mMaxVertexes * mFormat.vertexAttributeCount);
+		Assert(mVertexes * mFormat.vertexAttributeCount + cnt + mFormat.coordinateCount <= mMaxVertexes * mFormat.vertexAttributeCount);
 		memcpy(mData + mVertexes * mFormat.vertexAttributeCount, mVertexAttributes, cnt * sizeof(float));
 		memcpy(mData + mVertexes * mFormat.vertexAttributeCount + cnt, coords, mFormat.coordinateCount * sizeof(float));
 		mVertexes++;

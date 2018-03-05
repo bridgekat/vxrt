@@ -162,6 +162,13 @@ public:
 		(*this) = res;
 		return *this;
 	}
+	
+	// Get inversed matrix
+	Mat4 getInverse() const {
+		Mat4 res = *this;
+		res.inverse();
+		return res;
+	}
 
 	// Construct a translation matrix
 	static Mat4 translation(const Vec3<T>& delta) {

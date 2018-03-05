@@ -93,6 +93,8 @@ private:
 			mFinal.bind();
 			mFinal.setUniformMatrix4fv("ProjectionMatrix", mProjection.getTranspose().data);
 			mFinal.setUniformMatrix4fv("ModelViewMatrix", mModelview.getTranspose().data);
+			mFinal.setUniformMatrix4fv("ProjectionInverse", mProjection.getInverse().getTranspose().data);
+			mFinal.setUniformMatrix4fv("ModelViewInverse", mModelview.getInverse().getTranspose().data);
 		}
 	}
 };

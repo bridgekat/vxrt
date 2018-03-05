@@ -22,7 +22,7 @@ int main(){
 		Renderer::clear();
 		
 		Renderer::beginFinalPass();
-		Renderer::restoreProjection();
+		Renderer::setProjection(Mat4f::perspective(70.0f, float(win.getWidth()) / float(win.getHeight()), 0.1f, 256.0f));
 		Renderer::restoreModelview();
 		
 		VertexArray va(6, VertexFormat(0, 0, 0, 2));

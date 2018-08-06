@@ -77,6 +77,8 @@ public:
 	static void flush() { glFlush(); }
 	static void waitForComplete() { glFinish(); }
 	static void checkError();
+	
+	static const ShaderProgram& shader() { return mFinal; }
 
 private:
 	static int matrixMode;

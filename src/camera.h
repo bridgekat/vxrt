@@ -3,6 +3,7 @@
 
 #include "vec.h"
 #include "mat.h"
+#include "window.h"
 
 class Camera {
 public:
@@ -25,6 +26,11 @@ public:
 		res *= Mat4f::rotation(-mRotation.y, Vec3f(0.0f, 1.0f, 0.0f));
 		res *= Mat4f::translation(-mPosition);
 		return res;
+	}
+	
+	void update(const Window& win) {
+		MouseState mouse = win.getMouseMotion();
+		mRotation += Vec3f(-mouse.y * 0.3f, -mouse.x * 0.3f, 0.0f);
 	}
 
 private:

@@ -116,6 +116,15 @@ void ShaderProgram::setUniform1i(const std::string& uniform, int v0) {
 	glUniform1i(loc, v0);
 }
 
+void ShaderProgram::setUniform1ui(const std::string& uniform, unsigned int v0) {
+	int loc = getUniformLocation(uniform);
+	if (loc == -1) {
+//		LogWarning("Shader uniform variable not found: " + uniform);
+		return;
+	}
+	glUniform1ui(loc, v0);
+}
+
 void ShaderProgram::setUniformMatrix4fv(const std::string& uniform, float* v0) {
 	int loc = getUniformLocation(uniform);
 	if (loc == -1) {

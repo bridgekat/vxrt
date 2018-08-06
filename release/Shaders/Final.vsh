@@ -1,7 +1,6 @@
 #version 330 core
 
-layout(location = 0) in vec2 Position;
-
+layout (location = 0) in vec2 Position;
 out vec2 FragCoords;
 
 void main() {

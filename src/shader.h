@@ -24,6 +24,8 @@ public:
 		glDetachShader(mHandle, mFragment.handle());
 		glDeleteProgram(mHandle);
 	}
+	
+	GLuint handle() const noexcept { return mHandle; }
 
 	void loadShadersFromFile(const std::string& vertex, const std::string& fragment);
 
@@ -37,6 +39,7 @@ public:
 	void setUniform3f(const std::string& uniform, float v0, float v1, float v2);
 	void setUniform4f(const std::string& uniform, float v0, float v1, float v2, float v3);
 	void setUniform1i(const std::string& uniform, int v0);
+	void setUniform1ui(const std::string& uniform, unsigned int v0);
 	void setUniformMatrix4fv(const std::string& uniform, float* v0);
 
 private:

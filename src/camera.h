@@ -24,7 +24,8 @@ public:
 		res *= Mat4f::rotation(-mRotation.z, Vec3f(0.0f, 0.0f, 1.0f));
 		res *= Mat4f::rotation(-mRotation.x, Vec3f(1.0f, 0.0f, 0.0f));
 		res *= Mat4f::rotation(-mRotation.y, Vec3f(0.0f, 1.0f, 0.0f));
-		res *= Mat4f::translation(-mPosition);
+		// Preserve matrix inverse accuracy by applying translation in the shaders
+//		res *= Mat4f::translation(-mPosition);
 		return res;
 	}
 	

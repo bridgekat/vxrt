@@ -18,7 +18,7 @@ int main(){
 	}
 	
 	if (!OpenGL::arbShaderStorageBufferObject()) {
-		LogError("ARB_shader_storage_buffer_object not supported!");
+		LogError("ARB_shader_storage_buffer_object is not supported!");
 		return 0;
 	}
 	

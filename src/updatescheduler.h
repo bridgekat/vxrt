@@ -5,7 +5,7 @@ class UpdateScheduler {
 public:
 	UpdateScheduler(int frequency): mInterval(1.0 / frequency) {
 		init();
-		refresh();
+		sync();
 	}
 
 	void refresh() { mOnline = getTime(); }

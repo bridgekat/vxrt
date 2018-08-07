@@ -5,11 +5,12 @@
 #include "camera.h"
 #include "shaderbuffer.h"
 #include "tree.h"
+#include "updatescheduler.h"
 
 int main(){
 	Config::load();
 	
-	Window& win = Window::getDefaultWindow("Voxel Raycasting Test (Static SVO)", 852, 480);
+	Window& win = Window::getDefaultWindow("vxrt", 852, 480);
 	
 	if (!OpenGL::coreProfile()) {
 		LogError("Program must run in OpenGL core profile!");
@@ -31,6 +32,9 @@ int main(){
 	
 	Camera camera;
 	win.lockCursor();
+	
+	UpdateScheduler fpsCounterScheduler(1);
+	int fpsCounter = 0;
 	
 	while (!win.shouldQuit()) {
 		Renderer::waitForComplete();
@@ -57,6 +61,16 @@ int main(){
 		VertexBuffer(va, false).render();
 		
 		Renderer::endFinalPass();
+		
+		fpsCounter++;
+		fpsCounterScheduler.refresh();
+		while (!fpsCounterScheduler.inSync()) {
+			std::stringstream ss;
+			ss << "Voxel Raycasting Test (Static SVO, " << fpsCounter << " fps)";
+			Window::getDefaultWindow().setTitle(ss.str());
+			fpsCounter = 0;
+			fpsCounterScheduler.increase();
+		}
 		
 		win.pollEvents();
 		camera.setPerspective(70.0f, float(win.getWidth()) / float(win.getHeight()), 0.1f, 256.0f);

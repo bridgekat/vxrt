@@ -148,13 +148,7 @@ public:
 			swapRows(i, p);
 			res.multRow(i, T(1) / data[i * 4 + i]);
 			multRow(i, T(1) / data[i * 4 + i]);
-			for (int j = i + 1; j < 4; j++) {
-				res.multAndAdd(i, j, -data[j * 4 + i]);
-				multAndAdd(i, j, -data[j * 4 + i]);
-			}
-		}
-		for (int i = 3; i >= 0; i--) {
-			for (int j = 0; j < i; j++) {
+			for (int j = 0; j < 4; j++) if (j != i) {
 				res.multAndAdd(i, j, -data[j * 4 + i]);
 				multAndAdd(i, j, -data[j * 4 + i]);
 			}

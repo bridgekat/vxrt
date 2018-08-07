@@ -9,7 +9,7 @@
 int main(){
 	Config::load();
 	
-	Window& win = Window::getDefaultWindow("Static SVO Test", 640, 480);
+	Window& win = Window::getDefaultWindow("Voxel Raycasting Test (Static SVO)", 852, 480);
 	
 	if (!OpenGL::coreProfile()) {
 		LogError("Program must run in OpenGL core profile!");
@@ -26,12 +26,11 @@ int main(){
 	Tree tree;
 	tree.generate();
 	
-	Camera camera;
-	
-	win.lockCursor();
-	
 	ShaderBuffer ssbo(Renderer::shader(), "TreeData");
-	tree.update(ssbo);
+	tree.upload(ssbo);
+	
+	Camera camera;
+	win.lockCursor();
 	
 	while (!win.shouldQuit()) {
 		Renderer::waitForComplete();
@@ -43,6 +42,10 @@ int main(){
 		Renderer::beginFinalPass();
 		Renderer::setProjection(camera.getProjectionMatrix());
 		Renderer::setModelview(camera.getModelViewMatrix());
+		
+		Renderer::shader().setUniform1i("RootSize", tree.size());
+		Vec3f pos = camera.position();
+		Renderer::shader().setUniform3f("CameraPosition", pos.x, pos.y, pos.z);
 		
 		VertexArray va(6, VertexFormat(0, 0, 0, 2));
 		va.addVertex({-1.0f, 1.0f});

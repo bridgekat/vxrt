@@ -78,7 +78,7 @@ public:
 	static void waitForComplete() { glFinish(); }
 	static void checkError();
 	
-	static const ShaderProgram& shader() { return mFinal; }
+	static ShaderProgram& shader() { return mFinal; }
 
 private:
 	static int matrixMode;

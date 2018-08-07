@@ -6,28 +6,25 @@
 #include "debug.h"
 #include "logger.h"
 
-const int Size = 256;
-int height[Size][Size];
-
 void Tree::generate() {
 	LogInfo("Generating terrain height...");
-	for (int x = 0; x < Size; x++) {
-		for (int z = 0; z < Size; z++) {
-			height[x][z] = WorldGen::getHeight(x, z) + 64;
-		}
+	for (int x = 0; x < mSize; x++) for (int z = 0; z < mSize; z++) {
+		mHeightMap[x * mSize + z] = WorldGen::getHeight(x, z) + 64;
 	}
 	LogInfo("Generating tree...");
 	mNodeCount = 1;
 	mNodesGenerated = 0;
-	generateNode(0, mNodes, 0, 0, 0, Size);
+	generateNode(0, mNodes, 0, 0, 0, mSize);
 }
 
-void Tree::update(ShaderBuffer& ssbo){
+void Tree::upload(ShaderBuffer& ssbo){
 	LogInfo("Uploading tree data...");
 	unsigned int* buffer = new unsigned int[mNodeCount + 1];
 	buffer[0] = 0u;
 	for (int i = 0; i < mNodeCount; i++) {
-		buffer[i + 1] = ((int(mNodes[i].data)) + (int(mNodes[i].leaf) << 1) + (mNodes[i].children << 2));
+		buffer[i + 1] = mNodes[i].leaf ? 1u : 0u;
+		if (mNodes[i].leaf) buffer[i + 1] ^= (int(mNodes[i].data) << 1);
+		else buffer[i + 1] ^= (int(mNodes[i].children) << 1);
 	}
 	ssbo.update((mNodeCount + 1) * sizeof(unsigned int), (void*)buffer);
 	delete[] buffer;
@@ -39,11 +36,11 @@ void Tree::generateNode(int ind, TreeNode* arr, int x0, int y0, int z0, int size
 	mNodesGenerated++;
 	if (mNodesGenerated % 1000000 == 0) {
 		std::stringstream ss;
-		ss << mNodesGenerated << " nodes generated, " << mNodeCount << " indices used.";
+		ss << mNodesGenerated << " blocks generated, " << mNodeCount << " nodes used.";
 		LogInfo(ss.str());
 	}
 	if (size == 1) {
-		arr[ind].data = (height[x0][z0] >= y0);
+		arr[ind].data = (mHeightMap[x0 * mSize + z0] >= y0);
 		arr[ind].leaf = true;
 		return;
 	}
@@ -61,7 +58,8 @@ void Tree::generateNode(int ind, TreeNode* arr, int x0, int y0, int z0, int size
 	generateNode(cptr + 7, arr, x0 + half, y0 + half, z0 + half, half);
 	if (mNodeCount == cptr + 8) {
 		bool f = true;
-		for (int i = cptr + 1; i < cptr + 8; i++) {
+		for (int i = cptr + 0; i < cptr + 8; i++) {
+			Assert(arr[i].leaf);
 			if (arr[i].data != arr[cptr].data) {
 				f = false;
 				break;

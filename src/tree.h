@@ -11,16 +11,22 @@ public:
 		unsigned int children;
 	};
 	
-	Tree(unsigned int maxNodes = 16777216): mNodes(new TreeNode[maxNodes]) {
-		
+	Tree(int size = 256, unsigned int maxNodes = 16777216):
+		mSize(size), mNodes(new TreeNode[maxNodes]), mHeightMap(new int[size * size]) {}
+	
+	~Tree() {
+		delete[] mNodes;
+		delete[] mHeightMap;
 	}
 	
+	int size() { return mSize; }
 	void generate();
-	void update(ShaderBuffer& ssbo);
+	void upload(ShaderBuffer& ssbo);
 	
 private:
 	TreeNode* mNodes;
-	int mNodeCount, mNodesGenerated;
+	int mNodeCount, mNodesGenerated, mSize;
+	int* mHeightMap;
 	
 	void generateNode(int ind, TreeNode* arr, int x0, int y0, int z0, int size);
 };

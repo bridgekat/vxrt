@@ -25,7 +25,8 @@ public:
 	
 private:
 	TreeNode* mNodes;
-	int mNodeCount, mNodesGenerated, mSize;
+	int mNodeCount, mSize;
+	long long mBlocksGenerated;
 	int* mHeightMap;
 	
 	void generateNode(int ind, TreeNode* arr, int x0, int y0, int z0, int size);

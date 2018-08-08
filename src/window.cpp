@@ -13,7 +13,7 @@
 #endif
 
 // OpenGL debug callback
-void GLCALLBACK glDebugCallback(GLenum /*source*/, GLenum /*type*/, GLuint /*id*/, GLenum severity, GLsizei /*length*/, const GLchar* msg, void* /*data*/) {
+void GLCALLBACK glDebugCallback(GLenum /*source*/, GLenum /*type*/, GLuint /*id*/, GLenum severity, GLsizei /*length*/, const GLchar* msg, const void* /*data*/) {
 	if (severity != GL_DEBUG_SEVERITY_NOTIFICATION) {
 		std::stringstream ss("OpenGL debug: ");
 		ss << std::string(msg);

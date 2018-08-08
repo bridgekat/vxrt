@@ -1,4 +1,4 @@
-# Project vxrt
+# Project VXRT
 
-A ray-casting renderer based on sparse voxel octrees, licensed under WTFPLv2.  
-The name is "vxrt" simply because "rt" seems zhuangbier than "rc"!  
+A (slow) voxel ray-tracing renderer based on sparse voxel octrees!  
+Licensed under WTFPLv2.  

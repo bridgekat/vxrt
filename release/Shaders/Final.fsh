@@ -30,6 +30,8 @@ bool inside(vec3 a, AABB box) {
 
 const uint Root = 1u;
 const float Eps = 1e-4;
+const int MaxTracedRays = 16;
+const float DiffuseFactor = 0.1f;
 uint getPrimitiveData(uint ind) { return uint(data[ind]); }
 bool isLeaf(uint ind) { return getPrimitiveData(ind) % 2u != 0u; }
 uint getData(uint ind) { return getPrimitiveData(ind) / 2u; }
@@ -144,25 +146,76 @@ int marchProfiler(vec3 org, vec3 dir) {
 	return RootSize;
 }
 
+vec3 getSkyColor(in vec3 dir) {
+	vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
+	float sun = mix(0.0f, 0.7f, clamp(smoothstep(0.996f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 4.0f;
+	sun += mix(0.0f, 0.3f, clamp(smoothstep(0.1f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f));
+	vec3 sky = mix(
+		vec3(152.0f / 255.0f, 211.0f / 255.0f, 250.0f / 255.0f),
+		vec3(90.0f / 255.0f, 134.0f / 255.0f, 206.0f / 255.0f),
+		smoothstep(0.0f, 1.0f, normalize(dir).y * 2.0f)
+	);
+	return mix(sky, vec3(1.0f, 1.0f, 1.0f), sun);
+}
+
+float noise3D(vec3 c) {
+    return fract(sin(dot(c.xyz, vec3(12.9898f, 78.233f, 233.666f))) * 43758.5453f);
+}
+
+vec3 rayTrace(vec3 org, vec3 dir) {
+/*
+	vec3 Palette[7] = vec3[7](
+		vec3(0.0f, 0.0f, 0.0f),
+		vec3(147.5f, 166.4f, 77.0f) / 255.0f,
+		vec3(147.5f, 166.4f, 77.0f) / 255.0f,
+		vec3(151.0f, 228.0f, 90.0f) / 255.0f,
+		vec3(144.0f, 105.0f, 64.0f) / 255.0f,
+		vec3(147.5f, 166.4f, 77.0f) / 255.0f,
+		vec3(147.5f, 166.4f, 77.0f) / 255.0f
+	);
+*/
+	vec3 Palette[7] = vec3[7](
+		vec3(0.0f, 0.0f, 0.0f),
+		vec3(0.5f, 0.8f, 0.9f),
+		vec3(0.5f, 0.8f, 0.9f),
+		vec3(0.5f, 0.8f, 0.9f),
+		vec3(0.5f, 0.8f, 0.9f),
+		vec3(0.5f, 0.8f, 0.9f),
+		vec3(0.5f, 0.8f, 0.9f)
+	);
+	vec3 Dither[3] = vec3[3](
+		vec3(0.1f, 0.13f, 0.99f),
+		vec3(0.13f, 0.1f, 0.99f),
+		vec3(0.99f, 0.1f, 0.13f)
+	);
+	
+	vec3 res = vec3(1.0f);
+	for (int i = 0; i < MaxTracedRays; i++) {
+		Intersection p = rayMarch(org, dir);
+		if (p.face == 0) return res * getSkyColor(dir);
+		vec3 col = Palette[p.face];
+		res *= col;
+		org = p.pos;
+		vec3 normal = Normal[p.face];
+		vec3 shift = vec3(noise3D(org + Dither[0]), noise3D(org + Dither[1]), noise3D(org + Dither[2])) - vec3(0.5f);
+		shift = normalize(shift) * noise3D(shift);
+		normal = normalize(normal + shift * DiffuseFactor);
+//		float proj = dot(Normal[p.face], normal);
+//		if (proj < 0.0) normal -= 2.0f * proj * Normal[p.face];
+		dir = reflect(dir, normal);
+	}
+	
+	return res * getSkyColor(dir);
+}
+
 void main() {
 	vec4 fragPosition = ModelViewInverse * ProjectionInverse * vec4(FragCoords, 1.0f, 1.0f);
 	vec3 dir = normalize(divide(fragPosition));
 	vec3 color = vec3(0.0f);
 	
-	vec3 palette[7] = vec3[7](
-		vec3(0.7f, 0.9f, 1.0f),
-		vec3(1.0f, 0.0f, 0.0f),
-		vec3(1.0f, 0.5f, 0.0f),
-		vec3(1.0f, 1.0f, 0.0f),
-		vec3(1.0f, 1.0f, 1.0f),
-		vec3(0.0f, 0.0f, 1.0f),
-		vec3(0.0f, 1.0f, 0.0f)
-	);
-	
-	Intersection res = rayMarch(CameraPosition + vec3(float(RootSize) / 2.0f + 1e-2), dir);
-	color = palette[res.face];
-	//int res = marchProfiler(CameraPosition + vec3(float(RootSize) / 2.0f), dir);
+	//int res = marchProfiler(CameraPosition + vec3(float(RootSize) / 2.0f + 1e-2), dir);
 	//color = vec3(float(res) / 100.0f);
+	color = rayTrace(CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f), dir);
 	
     FragColor = vec4(color, 1.0f);
 }

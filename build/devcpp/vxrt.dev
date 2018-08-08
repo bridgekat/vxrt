@@ -5,7 +5,7 @@ Type=1
 Ver=2
 ObjFiles=
 Includes=../../include
-Libs=../../lib
+Libs=../../lib;../../lib64
 PrivateResource=
 ResourceIncludes=
 MakeIncludes=
@@ -28,7 +28,7 @@ Folders=
 IncludeVersionInfo=0
 SupportXPThemes=0
 CompilerSet=4
-CompilerSettings=0000000100000000001000000
+CompilerSettings=0000000100110000001000000
 UnitCount=27
 
 [VersionInfo]

@@ -13,7 +13,7 @@ void Tree::generate() {
 	}
 	LogInfo("Generating tree...");
 	mNodeCount = 1;
-	mNodesGenerated = 0;
+	mBlocksGenerated = 0;
 	generateNode(0, mNodes, 0, 0, 0, mSize);
 }
 
@@ -33,14 +33,21 @@ void Tree::upload(ShaderBuffer& ssbo){
 
 void Tree::generateNode(int ind, TreeNode* arr, int x0, int y0, int z0, int size) {
 	Assert(size >= 1);
-	mNodesGenerated++;
-	if (mNodesGenerated % 1000000 == 0) {
-		std::stringstream ss;
-		ss << mNodesGenerated << " blocks generated, " << mNodeCount << " nodes used.";
-		LogInfo(ss.str());
-	}
 	if (size == 1) {
+		// Generate single block
 		arr[ind].data = (mHeightMap[x0 * mSize + z0] >= y0);
+		arr[ind].leaf = true;
+		// Count
+		mBlocksGenerated++;
+		if (mBlocksGenerated % 1000000 == 0) {
+			std::stringstream ss;
+			ss << mBlocksGenerated << " blocks generated, " << mNodeCount << " nodes used.";
+			LogInfo(ss.str());
+		}
+		return;
+	}
+	if (y0 >= 256) {
+		arr[ind].data = 0;
 		arr[ind].leaf = true;
 		return;
 	}

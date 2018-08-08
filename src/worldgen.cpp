@@ -25,7 +25,7 @@ double WorldGen::InterpolatedNoise(double x, double y) {
 double WorldGen::PerlinNoise2D(double x, double y) {
 	double total = 0, frequency = 1, amplitude = 1;
 	for (int i = 0; i <= 4; i++) {
-		total += InterpolatedNoise(x*frequency, y*frequency)*amplitude;
+		total += InterpolatedNoise(x * frequency, y * frequency) * amplitude;
 		frequency *= 2;
 		amplitude /= 2.0;
 	}

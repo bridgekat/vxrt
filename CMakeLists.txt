@@ -2,19 +2,19 @@ cmake_minimum_required(VERSION 3.0)
 set(CMAKE_CXX_STANDARD 11)
 
 set(PROJECT_ROOT_PATH ${CMAKE_SOURCE_DIR})
-set(BINARY_DIR ${PROJECT_ROOT_PATH}/release/Binaries/)
+set(BINARY_DIR ${PROJECT_ROOT_PATH}/release/)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BINARY_DIR})
 
 # Set search paths
-set(DEPS_INCLUDE "" CACHE PATH "The path to depended includes")
-set(DEPS_LIB "" CACHE PATH "The path to depended libraries")
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${DEPS_INCLUDE} ${DEPS_LIB})
+set(DEPS_INCLUDE_PATH "" CACHE PATH "The path to depended includes")
+set(DEPS_LIB_PATH "" CACHE PATH "The path to depended libraries")
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${DEPS_INCLUDE_PATH} ${DEPS_LIB_PATH})
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_ROOT_PATH}/cmake)
 
 # Project
-
 project(vxrt)
 
+add_definitions(-DSDL_MAIN_HANDLED)
 aux_source_directory(./src/ SOURCE)
 
 # Link OpenGL & GLEW

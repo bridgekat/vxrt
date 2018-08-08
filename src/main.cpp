@@ -24,7 +24,8 @@ int main(){
 	
 	Renderer::init();
 	
-	Tree tree;
+//	Tree tree(4096, 134217728);
+	Tree tree(256, 524288);
 	tree.generate();
 	
 	ShaderBuffer ssbo(Renderer::shader(), "TreeData");
@@ -66,7 +67,7 @@ int main(){
 		fpsCounterScheduler.refresh();
 		while (!fpsCounterScheduler.inSync()) {
 			std::stringstream ss;
-			ss << "Voxel Raycasting Test (Static SVO, " << fpsCounter << " fps)";
+			ss << "Voxel Raytracing Test (Static SVO, " << fpsCounter << " fps)";
 			Window::getDefaultWindow().setTitle(ss.str());
 			fpsCounter = 0;
 			fpsCounterScheduler.increase();

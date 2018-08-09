@@ -31,7 +31,7 @@ bool inside(vec3 a, AABB box) {
 const uint Root = 1u;
 const float Eps = 1e-4;
 const int MaxTracedRays = 16;
-const float DiffuseFactor = 0.1f;
+const float DiffuseFactor = 0.02f;
 uint getPrimitiveData(uint ind) { return uint(data[ind]); }
 bool isLeaf(uint ind) { return getPrimitiveData(ind) % 2u != 0u; }
 uint getData(uint ind) { return getPrimitiveData(ind) / 2u; }
@@ -81,7 +81,7 @@ vec3 Normal[7] = vec3[7](
 	vec3( 0.0f, 0.0f,-1.0f)
 );
 
-Intersection innerIntersect(vec3 org, vec3 dir, AABB box) {
+Intersection innerIntersect(vec3 org, vec3 dir, AABB box, int ignore) {
 	float scale[7];
 	scale[0] = 0.0f;
 	scale[1] = (box.a.x - org.x) / dir.x; // x- (Reversed from normal)
@@ -91,7 +91,7 @@ Intersection innerIntersect(vec3 org, vec3 dir, AABB box) {
 	scale[5] = (box.a.z - org.z) / dir.z; // z-
 	scale[6] = (box.b.z - org.z) / dir.z; // z+
 	int face = 0;
-	for (int i = 1; i <= 6; i++) if (scale[i] > 0.0f) {
+	for (int i = 1; i <= 6; i++) if (/*dot(dir, Normal[i]) < 0.0f && */i != ignore && scale[i] > 0.0f) {
 		if (face == 0 || scale[i] < scale[face]) face = i;
 	}
 	return Intersection(org + dir * scale[face], face);
@@ -114,10 +114,9 @@ Intersection outerIntersect(vec3 org, vec3 dir, AABB box) {
 	return Intersection(org + dir * scale[face], face);
 }
 
-Intersection rayMarch(vec3 org, vec3 dir) {
+Intersection rayMarch(Intersection p, vec3 dir) {
 	dir = normalize(dir);
 	AABB box = AABB(vec3(0.0f), vec3(float(RootSize))); // Root box
-	Intersection p = Intersection(org, 0);
 	if (!inside(p.pos, box)) p = outerIntersect(p.pos, dir, box);
 	
 	for (int i = 0; i < RootSize; i++) {
@@ -127,7 +126,7 @@ Intersection rayMarch(vec3 org, vec3 dir) {
 		} else if (getData(node.ptr) != 0u) { // Opaque block
 			return p;
 		}
-		p = innerIntersect(p.pos + Eps * dir, dir, node.box);
+		p = innerIntersect(p.pos, dir, node.box, BackFace[p.face]);
 	}	
 	return Intersection(p.pos, 0);
 }
@@ -141,7 +140,7 @@ int marchProfiler(vec3 org, vec3 dir) {
 	for (int i = 0; i < RootSize; i++) {
 		Node node = getNodeAt(p.pos - 0.1f * Normal[p.face]);
 		if (node.ptr == 0u || getData(node.ptr) != 0u) return i;
-		p = innerIntersect(p.pos + Eps * dir, dir, node.box);
+		p = innerIntersect(p.pos, dir, node.box, BackFace[p.face]);
 	}	
 	return RootSize;
 }
@@ -190,8 +189,10 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 	);
 	
 	vec3 res = vec3(1.0f);
+	Intersection p = Intersection(org, 0);
+	
 	for (int i = 0; i < MaxTracedRays; i++) {
-		Intersection p = rayMarch(org, dir);
+		p = rayMarch(p, dir);
 		if (p.face == 0) return res * getSkyColor(dir);
 		vec3 col = Palette[p.face];
 		res *= col;
@@ -203,6 +204,7 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 //		float proj = dot(Normal[p.face], normal);
 //		if (proj < 0.0) normal -= 2.0f * proj * Normal[p.face];
 		dir = reflect(dir, normal);
+		p.face = BackFace[p.face];
 	}
 	
 	return res * getSkyColor(dir);
@@ -213,8 +215,8 @@ void main() {
 	vec3 dir = normalize(divide(fragPosition));
 	vec3 color = vec3(0.0f);
 	
-	//int res = marchProfiler(CameraPosition + vec3(float(RootSize) / 2.0f + 1e-2), dir);
-	//color = vec3(float(res) / 100.0f);
+//	int res = marchProfiler(CameraPosition + vec3(float(RootSize) / 2.0f + 1e-2), dir);
+//	color = vec3(float(res) / 100.0f);
 	color = rayTrace(CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f), dir);
 	
     FragColor = vec4(color, 1.0f);

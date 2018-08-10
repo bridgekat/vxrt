@@ -77,6 +77,16 @@ int main(){
 		camera.setPerspective(70.0f, float(win.getWidth()) / float(win.getHeight()), 0.1f, 256.0f);
 		camera.update(win);
 		
+		static bool lpressed = false;
+		if (Window::isKeyPressed(SDL_SCANCODE_L)) {
+			if (!lpressed) {
+				static bool locked = true;
+				locked = !locked;
+				if (locked) win.lockCursor();
+				else win.unlockCursor();
+			}
+			lpressed = true;
+		} else lpressed = false;
 		if (Window::isKeyPressed(SDL_SCANCODE_ESCAPE)) break;
 	}
 	

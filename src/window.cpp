@@ -29,7 +29,7 @@ Window::Window(const std::string& title, int width, int height):
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
 	static bool openglDebug = Config::getInt("OpenGL.Debugging", 0) != 0;
-	static bool coreProfile = Config::getInt("OpenGL.CoreProfile", 0) != 0;
+	static bool coreProfile = Config::getInt("OpenGL.CoreProfile", 1) != 0;
 	static bool gles = Config::getInt("OpenGL.ES", 0) != 0;
 	if (gles) coreProfile = true;
 

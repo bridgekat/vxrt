@@ -1,4 +1,4 @@
-#version 330 core
+#version 430 core
 #extension GL_ARB_shader_storage_buffer_object: enable
 
 uniform mat4 ProjectionMatrix;
@@ -33,7 +33,7 @@ const float Eps = 1e-4;
 const int MaxTracedRays = 16;
 const float DiffuseFactor = 0.02f;
 uint getPrimitiveData(uint ind) { return uint(data[ind]); }
-bool isLeaf(uint ind) { return getPrimitiveData(ind) % 2u != 0u; }
+bool isLeaf(uint ind) { return mod(getPrimitiveData(ind), 2u) != 0u; }
 uint getData(uint ind) { return getPrimitiveData(ind) / 2u; }
 uint getChildrenPtr(uint ind) { return getPrimitiveData(ind) / 2u + Root; }
 

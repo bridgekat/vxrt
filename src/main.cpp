@@ -73,6 +73,7 @@ int main(){
 		if (!pathTracing) {
 			Renderer::setRenderArea(0, 0, win.getWidth(), win.getHeight());
 		} else {
+			Renderer::setRenderArea(0, 0, fbWidth, fbHeight);
 			fbo[curr].bind();
 			fbo[curr ^ 1].bindColorTextures(0);
 		}
@@ -146,6 +147,17 @@ int main(){
 			}
 			lpressed = true;
 		} else lpressed = false;
+		
+		static bool upressed = false;
+		if (Window::isKeyPressed(SDL_SCANCODE_U)) {
+			if (!upressed) {
+				static bool fullscreen = false;
+				fullscreen = !fullscreen;
+				if (fullscreen) win.setFullscreen(true);
+				else win.setFullscreen(false);
+			}
+			upressed = true;
+		} else upressed = false;
 		
 		static bool ppressed = false;
 		if (Window::isKeyPressed(SDL_SCANCODE_P)) {

@@ -44,6 +44,10 @@ public:
 	void lockCursor() const { SDL_SetRelativeMouseMode(SDL_TRUE); }
 	void unlockCursor() const { SDL_SetRelativeMouseMode(SDL_FALSE); }
 	void setTitle(const std::string& title) { SDL_SetWindowTitle(mWindow, title.c_str()); }
+	void setFullscreen(bool f) {
+		if (f) SDL_SetWindowFullscreen(mWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
+		else SDL_SetWindowFullscreen(mWindow, 0);
+	}
 
 	void pollEvents();
 

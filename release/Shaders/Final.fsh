@@ -192,6 +192,7 @@ vec3 Dither[3] = vec3[3](
 );
 
 vec3 rayTrace(vec3 org, vec3 dir) {
+	dir = normalize(dir);
 	vec3 res = vec3(1.0f);
 	Intersection p = Intersection(org, 0);
 	
@@ -205,9 +206,9 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 		vec3 shift = vec3(noise3D(org + Dither[0]), noise3D(org + Dither[1]), noise3D(org + Dither[2])) - vec3(0.5f);
 		shift = normalize(shift) * noise3D(shift);
 		normal = normalize(normal + shift * DiffuseFactor);
-//		float proj = dot(Normal[p.face], normal);
-//		if (proj < 0.0) normal -= 2.0f * proj * Normal[p.face];
 		dir = reflect(dir, normal);
+		float proj = dot(Normal[p.face], dir);
+		if (proj < 0.0) dir -= 2.0f * proj * Normal[p.face];
 		p.face = BackFace[p.face];
 	}
 	

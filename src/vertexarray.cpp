@@ -61,7 +61,7 @@ void VertexBuffer::update(const VertexArray& va, bool staticDraw) {
 }
 
 VertexBuffer::VertexBuffer(const VertexArray& va, bool staticDraw):
-	vertexes(va.vertexCount()), format(va.format()), id(0), vao(0) {
+	id(0), vao(0), vertexes(va.vertexCount()), format(va.format()) {
 	update(va, staticDraw);
 }
 

@@ -14,7 +14,7 @@ void Tree::generate() {
 	LogInfo("Generating tree...");
 	mNodeCount = 1;
 	mBlocksGenerated = 0;
-	generateNode(0, mNodes, 0, 0, 0, mSize);
+	generateNode(0, 0, 0, 0, mSize);
 }
 
 void Tree::upload(ShaderBuffer& ssbo){
@@ -31,50 +31,53 @@ void Tree::upload(ShaderBuffer& ssbo){
 	std::stringstream ss; ss << mNodeCount << " nodes uploaded."; LogInfo(ss.str());
 }
 
-void Tree::generateNode(int ind, TreeNode* arr, int x0, int y0, int z0, int size) {
+void Tree::generateNode(size_t ind, int x0, int y0, int z0, int size) {
 	Assert(size >= 1);
+	if (ind >= mNodes.size()) mNodes.resize(ind + 1);
 	if (size == 1) {
 		// Generate single block
-		arr[ind].data = (mHeightMap[x0 * mSize + z0] >= y0);
-		arr[ind].leaf = true;
+		mNodes[ind].data = (mHeightMap[x0 * mSize + z0] >= y0);
+		mNodes[ind].leaf = true;
 		// Count
 		mBlocksGenerated++;
-		if (mBlocksGenerated % 1000000 == 0) {
+		if (mBlocksGenerated % 10000000 == 0) {
+			int percent = mBlocksGenerated * 100 / ((long long)mSize * mSize * mHeight);
 			std::stringstream ss;
-			ss << mBlocksGenerated << " blocks generated, " << mNodeCount << " nodes used.";
-			LogInfo(ss.str());
+			ss << mBlocksGenerated << "(" << percent << "%) blocks generated, ";
+			ss << mNodeCount << " nodes used.";
+			LogVerbose(ss.str());
 		}
 		return;
 	}
-	if (y0 >= 256) {
-		arr[ind].data = 0;
-		arr[ind].leaf = true;
+	if (y0 >= mHeight) {
+		mNodes[ind].data = 0;
+		mNodes[ind].leaf = true;
 		return;
 	}
-	arr[ind].leaf = false;
-	int cptr = arr[ind].children = mNodeCount;
+	mNodes[ind].leaf = false;
+	int cptr = mNodes[ind].children = mNodeCount;
 	int half = size / 2;
 	mNodeCount += 8;
-	generateNode(cptr + 0, arr, x0, y0, z0, half);
-	generateNode(cptr + 1, arr, x0 + half, y0, z0, half);
-	generateNode(cptr + 2, arr, x0, y0 + half, z0, half);
-	generateNode(cptr + 3, arr, x0 + half, y0 + half, z0, half);
-	generateNode(cptr + 4, arr, x0, y0, z0 + half, half);
-	generateNode(cptr + 5, arr, x0 + half, y0, z0 + half, half);
-	generateNode(cptr + 6, arr, x0, y0 + half, z0 + half, half);
-	generateNode(cptr + 7, arr, x0 + half, y0 + half, z0 + half, half);
+	generateNode(cptr + 0, x0, y0, z0, half);
+	generateNode(cptr + 1, x0 + half, y0, z0, half);
+	generateNode(cptr + 2, x0, y0 + half, z0, half);
+	generateNode(cptr + 3, x0 + half, y0 + half, z0, half);
+	generateNode(cptr + 4, x0, y0, z0 + half, half);
+	generateNode(cptr + 5, x0 + half, y0, z0 + half, half);
+	generateNode(cptr + 6, x0, y0 + half, z0 + half, half);
+	generateNode(cptr + 7, x0 + half, y0 + half, z0 + half, half);
 	if (mNodeCount == cptr + 8) {
 		bool f = true;
 		for (int i = cptr + 0; i < cptr + 8; i++) {
-			Assert(arr[i].leaf);
-			if (arr[i].data != arr[cptr].data) {
+			Assert(mNodes[i].leaf);
+			if (mNodes[i].data != mNodes[cptr].data) {
 				f = false;
 				break;
 			}
 		}
 		if (f) {
-			arr[ind].leaf = true;
-			arr[ind].data = arr[cptr].data;
+			mNodes[ind].leaf = true;
+			mNodes[ind].data = mNodes[cptr].data;
 			mNodeCount -= 8;
 		}
 	}

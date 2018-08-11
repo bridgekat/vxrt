@@ -10,7 +10,7 @@ namespace WorldGen {
 	inline double Noise(int x, int y) {
 		long long xx = x * 107 + y * 13258953287;
 		xx = xx >> 13 ^ xx;
-		return (xx*(xx*xx * 15731 + 789221) + 1376312589 & 0x7fffffff) / 16777216.0;
+		return ((xx*(xx*xx * 15731 + 789221) + 1376312589) & 0x7fffffff) / 16777216.0;
 	}
 	inline double Interpolate(double a, double b, double x) { return a * (1.0 - x) + b * x; }
 	double InterpolatedNoise(double x, double y);

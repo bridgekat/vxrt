@@ -1,6 +1,7 @@
 #ifndef TREE_H_
 #define TREE_H_
 
+#include <vector>
 #include "shaderbuffer.h"
 
 class Tree {
@@ -11,11 +12,10 @@ public:
 		unsigned int children;
 	};
 	
-	Tree(int size = 256, unsigned int maxNodes = 16777216):
-		mSize(size), mNodes(new TreeNode[maxNodes]), mHeightMap(new int[size * size]) {}
+	Tree(int size, int height):
+		mNodeCount(0), mSize(size), mHeight(height), mHeightMap(new int[size * size]) {}
 	
 	~Tree() {
-		delete[] mNodes;
 		delete[] mHeightMap;
 	}
 	
@@ -24,12 +24,12 @@ public:
 	void upload(ShaderBuffer& ssbo);
 	
 private:
-	TreeNode* mNodes;
-	int mNodeCount, mSize;
+	std::vector<TreeNode> mNodes;
+	int mNodeCount, mSize, mHeight;
 	long long mBlocksGenerated;
 	int* mHeightMap;
 	
-	void generateNode(int ind, TreeNode* arr, int x0, int y0, int z0, int size);
+	void generateNode(size_t ind, int x0, int y0, int z0, int size);
 };
 
 #endif

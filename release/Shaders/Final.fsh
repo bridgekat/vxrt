@@ -7,9 +7,16 @@ uniform mat4 ProjectionInverse;
 uniform mat4 ModelViewInverse;
 uniform int RootSize;
 uniform vec3 CameraPosition;
+uniform float RandomSeed;
 
-layout (std430, binding = 0)
-buffer TreeData {
+uniform int PathTracing;
+uniform sampler2D PrevFrame;
+uniform int SampleCount;
+uniform int FrameWidth;
+uniform int FrameHeight;
+uniform int FrameBufferSize;
+
+layout(std430) buffer TreeData {
 	uint data[];
 };
 
@@ -121,11 +128,8 @@ Intersection rayMarch(Intersection p, vec3 dir) {
 	
 	for (int i = 0; i < RootSize; i++) {
 		Node node = getNodeAt(p.pos - 0.1f * Normal[p.face]);
-		if (node.ptr == 0u) { // Out of range
-			break;
-		} else if (getData(node.ptr) != 0u) { // Opaque block
-			return p;
-		}
+		if (node.ptr == 0u) break; // Out of range
+		if (getData(node.ptr) != 0u) return p; // Opaque block
 		p = innerIntersect(p.pos, dir, node.box, BackFace[p.face]);
 	}	
 	return Intersection(p.pos, 0);
@@ -158,36 +162,36 @@ vec3 getSkyColor(in vec3 dir) {
 }
 
 float noise3D(vec3 c) {
-    return fract(sin(dot(c.xyz, vec3(12.9898f, 78.233f, 233.666f))) * 43758.5453f);
+    return fract(sin(dot(c.xyz, vec3(12.9898f, 78.233f + RandomSeed, 233.666f))) * 43758.5453f);
 }
 
-vec3 rayTrace(vec3 org, vec3 dir) {
 /*
-	vec3 Palette[7] = vec3[7](
-		vec3(0.0f, 0.0f, 0.0f),
-		vec3(147.5f, 166.4f, 77.0f) / 255.0f,
-		vec3(147.5f, 166.4f, 77.0f) / 255.0f,
-		vec3(151.0f, 228.0f, 90.0f) / 255.0f,
-		vec3(144.0f, 105.0f, 64.0f) / 255.0f,
-		vec3(147.5f, 166.4f, 77.0f) / 255.0f,
-		vec3(147.5f, 166.4f, 77.0f) / 255.0f
-	);
+vec3 Palette[7] = vec3[7](
+	vec3(0.0f, 0.0f, 0.0f),
+	vec3(147.5f, 166.4f, 77.0f) / 255.0f,
+	vec3(147.5f, 166.4f, 77.0f) / 255.0f,
+	vec3(151.0f, 228.0f, 90.0f) / 255.0f,
+	vec3(144.0f, 105.0f, 64.0f) / 255.0f,
+	vec3(147.5f, 166.4f, 77.0f) / 255.0f,
+	vec3(147.5f, 166.4f, 77.0f) / 255.0f
+);
 */
-	vec3 Palette[7] = vec3[7](
-		vec3(0.0f, 0.0f, 0.0f),
-		vec3(0.5f, 0.8f, 0.9f),
-		vec3(0.5f, 0.8f, 0.9f),
-		vec3(0.5f, 0.8f, 0.9f),
-		vec3(0.5f, 0.8f, 0.9f),
-		vec3(0.5f, 0.8f, 0.9f),
-		vec3(0.5f, 0.8f, 0.9f)
-	);
-	vec3 Dither[3] = vec3[3](
-		vec3(0.1f, 0.13f, 0.99f),
-		vec3(0.13f, 0.1f, 0.99f),
-		vec3(0.99f, 0.1f, 0.13f)
-	);
-	
+vec3 Palette[7] = vec3[7](
+	vec3(0.0f, 0.0f, 0.0f),
+	vec3(0.5f, 0.8f, 0.9f),
+	vec3(0.5f, 0.8f, 0.9f),
+	vec3(0.5f, 0.8f, 0.9f),
+	vec3(0.5f, 0.8f, 0.9f),
+	vec3(0.5f, 0.8f, 0.9f),
+	vec3(0.5f, 0.8f, 0.9f)
+);
+vec3 Dither[3] = vec3[3](
+	vec3(0.1f, 0.13f, 0.99f),
+	vec3(0.13f, 0.1f, 0.99f),
+	vec3(0.99f, 0.1f, 0.13f)
+);
+
+vec3 rayTrace(vec3 org, vec3 dir) {
 	vec3 res = vec3(1.0f);
 	Intersection p = Intersection(org, 0);
 	
@@ -207,7 +211,32 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 		p.face = BackFace[p.face];
 	}
 	
-	return res * getSkyColor(dir);
+	return res;// * getSkyColor(dir);
+}
+
+vec3 shadowTrace(vec3 org, vec3 dir) {
+	vec3 res = vec3(1.0f);
+	Intersection p = Intersection(org, 0);
+	
+	p = rayMarch(p, dir);
+	if (p.face == 0) return res * getSkyColor(dir);
+	
+	vec3 col = Palette[p.face];
+	res *= col;
+	org = p.pos;
+	vec3 normal = Normal[p.face];
+	dir = reflect(dir, normal);
+	int face = p.face;
+	p.pos += Eps * dir;
+	
+	vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
+	p = rayMarch(Intersection(p.pos, 0), -SunlightDirection);
+	float sunlight = clamp(dot(Normal[face], -SunlightDirection), -1.0f, 1.0f);
+	sunlight = sunlight / 2.0f + 0.5f;
+	if (p.face != 0) sunlight *= 0.5f;
+	res *= sunlight;
+	
+	return res;
 }
 
 void main() {
@@ -217,7 +246,17 @@ void main() {
 	
 //	int res = marchProfiler(CameraPosition + vec3(float(RootSize) / 2.0f + 1e-2), dir);
 //	color = vec3(float(res) / 100.0f);
-	color = rayTrace(CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f), dir);
+	vec3 pos = CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f);
+	color = rayTrace(pos, dir);
+//	color = (shadowTrace(pos, dir) + rayTrace(pos, dir)) / 2.0f;
 	
-    FragColor = vec4(color, 1.0f);
+//	color = pow(color, vec3(1.0f / 2.2f));
+	
+	if (PathTracing == 0 || SampleCount == 0) FragColor = vec4(color, 1.0f);
+    else {
+		vec2 texCoord = FragCoords / 2.0f + vec2(0.5f);
+		texCoord *= vec2(float(FrameWidth), float(FrameHeight)) / vec2(float(FrameBufferSize));
+		vec3 texel = texture(PrevFrame, texCoord).rgb;
+		FragColor = vec4((color + texel * float(SampleCount)) / float(SampleCount + 1), 1.0f);
+	}
 }

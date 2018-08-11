@@ -27,9 +27,9 @@ CommandLine=
 Folders=
 IncludeVersionInfo=0
 SupportXPThemes=0
-CompilerSet=4
-CompilerSettings=0000000100110000001000000
-UnitCount=27
+CompilerSet=1
+CompilerSettings=0000000000000000001000000
+UnitCount=29
 
 [VersionInfo]
 Major=1
@@ -312,6 +312,26 @@ BuildCmd=
 
 [Unit27]
 FileName=..\..\src\updatescheduler.h
+CompileCpp=1
+Folder=
+Compile=1
+Link=1
+Priority=1000
+OverrideBuildCmd=0
+BuildCmd=
+
+[Unit28]
+FileName=..\..\src\framebuffer.cpp
+CompileCpp=1
+Folder=
+Compile=1
+Link=1
+Priority=1000
+OverrideBuildCmd=0
+BuildCmd=
+
+[Unit29]
+FileName=..\..\src\framebuffer.h
 CompileCpp=1
 Folder=
 Compile=1

@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "config.h"
 #include "window.h"
 #include "renderer.h"
@@ -5,7 +6,30 @@
 #include "camera.h"
 #include "shaderbuffer.h"
 #include "tree.h"
+#include "framebuffer.h"
 #include "updatescheduler.h"
+
+FrameBuffer fbo[2];
+ShaderProgram presenter;
+int fbWidth, fbHeight;
+
+void enablePathTracing(Window& win) {
+	Renderer::waitForComplete();
+	fbWidth = win.getWidth();
+	fbHeight = win.getHeight();
+	fbo[0].create(fbWidth, fbHeight, 1, false);
+	fbo[1].create(fbWidth, fbHeight, 1, false);
+	Renderer::enableTexture2D();
+	win.unlockCursor();
+}
+
+void disablePathTracing(Window& win) {
+	Renderer::waitForComplete();
+	fbo[0].destroy();
+	fbo[1].destroy();
+	Renderer::disableTexture2D();
+	win.lockCursor();
+}
 
 int main(){
 	Config::load();
@@ -23,25 +47,35 @@ int main(){
 	}
 	
 	Renderer::init();
+	presenter.loadShadersFromFile(std::string(ShaderPath) + "Present.vsh", std::string(ShaderPath) + "Present.fsh");
 	
-//	Tree tree(4096, 134217728);
-	Tree tree(256, 524288);
+	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
 	tree.generate();
 	
-	ShaderBuffer ssbo(Renderer::shader(), "TreeData");
+	ShaderBuffer ssbo(Renderer::shader(), "TreeData", 0);
 	tree.upload(ssbo);
 	
 	Camera camera;
 	win.lockCursor();
 	
-	UpdateScheduler fpsCounterScheduler(1);
-	int fpsCounter = 0;
+	UpdateScheduler frameCounterScheduler(1);
+	int frameCounter = 0;
+	
+	bool pathTracing = false;
 	
 	while (!win.shouldQuit()) {
 		Renderer::waitForComplete();
+		Renderer::checkError();
 		win.swapBuffers();
 		
-		Renderer::setViewport(0, 0, win.getWidth(), win.getHeight());
+		int curr = frameCounter & 1;
+		
+		if (!pathTracing) {
+			Renderer::setRenderArea(0, 0, win.getWidth(), win.getHeight());
+		} else {
+			fbo[curr].bind();
+			fbo[curr ^ 1].bindColorTextures(0);
+		}
 		Renderer::clear();
 		
 		Renderer::beginFinalPass();
@@ -51,6 +85,15 @@ int main(){
 		Renderer::shader().setUniform1i("RootSize", tree.size());
 		Vec3f pos = camera.position();
 		Renderer::shader().setUniform3f("CameraPosition", pos.x, pos.y, pos.z);
+		Renderer::shader().setUniform1f("RandomSeed", float(rand()) / (RAND_MAX + 1.0f));
+		Renderer::shader().setUniform1i("PathTracing", int(pathTracing));
+		if (pathTracing) {
+			Renderer::shader().setUniform1i("PrevFrame", 0);
+			Renderer::shader().setUniform1i("SampleCount", frameCounter);
+			Renderer::shader().setUniform1i("FrameWidth", fbWidth);
+			Renderer::shader().setUniform1i("FrameHeight", fbHeight);
+			Renderer::shader().setUniform1i("FrameBufferSize", fbo[curr].size());
+		}
 		
 		VertexArray va(6, VertexFormat(0, 0, 0, 2));
 		va.addVertex({-1.0f, 1.0f});
@@ -63,19 +106,35 @@ int main(){
 		
 		Renderer::endFinalPass();
 		
-		fpsCounter++;
-		fpsCounterScheduler.refresh();
-		while (!fpsCounterScheduler.inSync()) {
+		if (pathTracing) {
+			presenter.bind();
+			fbo[curr].unbind();
+			fbo[curr].bindColorTextures(0);
+			presenter.setUniform1i("Texture", 0);
+			presenter.setUniform1i("FrameWidth", fbWidth);
+			presenter.setUniform1i("FrameHeight", fbHeight);
+			presenter.setUniform1i("FrameBufferSize", fbo[curr].size());
+			VertexBuffer(va, false).render();
+			presenter.unbind();
+		}
+
+		frameCounter++;
+		frameCounterScheduler.refresh();
+		while (!frameCounterScheduler.inSync()) {
 			std::stringstream ss;
-			ss << "Voxel Raytracing Test (Static SVO, " << fpsCounter << " fps)";
+			if (!pathTracing) {
+				ss << "Voxel Raytracing Test (Static SVO, " << frameCounter << " fps)";
+				frameCounter = 0;
+			} else {
+				ss << "Voxel Pathtracing Test (Static SVO, " << frameCounter << " samples per pixel)";
+			}
 			Window::getDefaultWindow().setTitle(ss.str());
-			fpsCounter = 0;
-			fpsCounterScheduler.increase();
+			frameCounterScheduler.increase();
 		}
 		
 		win.pollEvents();
 		camera.setPerspective(70.0f, float(win.getWidth()) / float(win.getHeight()), 0.1f, 256.0f);
-		camera.update(win);
+		if (!pathTracing) camera.update(win);
 		
 		static bool lpressed = false;
 		if (Window::isKeyPressed(SDL_SCANCODE_L)) {
@@ -87,6 +146,18 @@ int main(){
 			}
 			lpressed = true;
 		} else lpressed = false;
+		
+		static bool ppressed = false;
+		if (Window::isKeyPressed(SDL_SCANCODE_P)) {
+			if (!ppressed) {
+				pathTracing = !pathTracing;
+				if (pathTracing) enablePathTracing(win);
+				else disablePathTracing(win);
+				frameCounter = 0;
+			}
+			ppressed = true;
+		} else ppressed = false;
+		
 		if (Window::isKeyPressed(SDL_SCANCODE_ESCAPE)) break;
 	}
 	

@@ -16,7 +16,7 @@ public:
 	static void beginFinalPass() { mFinal.bind(); }
 	static void endFinalPass() { mFinal.unbind(); }
 
-	static void setViewport(int x, int y, int width, int height) {
+	static void setRenderArea(int x, int y, int width, int height) {
 		glViewport(x, y, width, height);
 	}
 

@@ -5,7 +5,7 @@
 
 class ShaderBuffer{
 public:
-	ShaderBuffer(const ShaderProgram& program, const std::string& name);
+	ShaderBuffer(const ShaderProgram& program, const std::string& name, GLuint binding);
 	
 	void update(int size, const void* data) {
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, mHandle);

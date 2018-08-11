@@ -18,7 +18,7 @@ public:
 
 	void bindBuffer(int index);
 	void bind();
-	void unbind() {
+	static void unbind() {
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 		glDrawBuffer(GL_BACK);
 		glReadBuffer(GL_BACK);

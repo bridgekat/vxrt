@@ -73,9 +73,9 @@ int main(){
 		if (!pathTracing) {
 			Renderer::setRenderArea(0, 0, win.getWidth(), win.getHeight());
 		} else {
-			Renderer::setRenderArea(0, 0, fbWidth, fbHeight);
 			fbo[curr].bind();
 			fbo[curr ^ 1].bindColorTextures(0);
+			Renderer::setRenderArea(0, 0, fbWidth, fbHeight);
 		}
 		Renderer::clear();
 		
@@ -108,9 +108,11 @@ int main(){
 		Renderer::endFinalPass();
 		
 		if (pathTracing) {
-			presenter.bind();
 			fbo[curr].unbind();
 			fbo[curr].bindColorTextures(0);
+			presenter.bind();
+			Renderer::clear();
+			Renderer::setRenderArea(0, 0, win.getWidth(), win.getHeight());
 			presenter.setUniform1i("Texture", 0);
 			presenter.setUniform1i("FrameWidth", fbWidth);
 			presenter.setUniform1i("FrameHeight", fbHeight);
@@ -134,8 +136,12 @@ int main(){
 		}
 		
 		win.pollEvents();
-		camera.setPerspective(70.0f, float(win.getWidth()) / float(win.getHeight()), 0.1f, 256.0f);
-		if (!pathTracing) camera.update(win);
+		if (!pathTracing) {
+			camera.setPerspective(70.0f, float(win.getWidth()) / float(win.getHeight()), 0.1f, 256.0f);
+			camera.update(win);
+		} else {
+			camera.setPerspective(70.0f, float(fbWidth) / float(fbHeight), 0.1f, 256.0f);
+		}
 		
 		static bool lpressed = false;
 		if (Window::isKeyPressed(SDL_SCANCODE_L)) {

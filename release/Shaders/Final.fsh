@@ -38,7 +38,7 @@ bool inside(vec3 a, AABB box) {
 const uint Root = 1u;
 const float Eps = 1e-4;
 const int MaxTracedRays = 16;
-const float DiffuseFactor = 0.02f;
+const float DiffuseFactor = 0.05f;
 uint getPrimitiveData(uint ind) { return uint(data[ind]); }
 bool isLeaf(uint ind) { return mod(getPrimitiveData(ind), 2u) != 0u; }
 uint getData(uint ind) { return getPrimitiveData(ind) / 2u; }
@@ -248,6 +248,13 @@ void main() {
 //	int res = marchProfiler(CameraPosition + vec3(float(RootSize) / 2.0f + 1e-2), dir);
 //	color = vec3(float(res) / 100.0f);
 	vec3 pos = CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f);
+	
+	vec3 focal = pos + dir * float(RootSize) / 6.0f;
+	vec3 shift = vec3(noise3D(dir + Dither[0]), noise3D(dir + Dither[1]), noise3D(dir + Dither[2])) - vec3(0.5f);
+	shift = normalize(shift - dir * dot(shift, dir));
+	pos += shift * 1.0f;
+	dir = normalize(focal - pos);
+	
 	color = rayTrace(pos, dir);
 //	color = (shadowTrace(pos, dir) + rayTrace(pos, dir)) / 2.0f;
 	

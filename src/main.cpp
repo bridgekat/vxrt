@@ -145,12 +145,6 @@ int main(){
 		}
 
 		win.pollEvents();
-		if (!pathTracing) {
-			camera.setPerspective(70.0f, float(win.getWidth()) / float(win.getHeight()), 0.1f, 256.0f);
-			camera.update(win);
-		} else {
-			camera.setPerspective(70.0f, float(fbWidth) / float(fbHeight), 0.1f, 256.0f);
-		}
 		
 		static bool opressed = false;
 		if (Window::isKeyPressed(SDL_SCANCODE_O)) {
@@ -202,6 +196,13 @@ int main(){
 			}
 			ppressed = true;
 		} else ppressed = false;
+		
+		if (!pathTracing) {
+			camera.setPerspective(70.0f, float(win.getWidth()) / float(win.getHeight()), 0.1f, 256.0f);
+			camera.update(win);
+		} else {
+			camera.setPerspective(70.0f, float(fbWidth) / float(fbHeight), 0.1f, 256.0f);
+		}
 
 		if (Window::isKeyPressed(SDL_SCANCODE_ESCAPE)) break;
 	}

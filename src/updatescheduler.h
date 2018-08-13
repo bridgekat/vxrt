@@ -14,7 +14,9 @@ public:
 	void increase() { mOffline += mInterval; }
 	// Interpolation factor
 	double delta() { return (getTime() - mOffline) / mInterval; }
-
+	
+	static double timeFromEpoch() { return getTime(); }
+	
 private:
 	double mInterval, mOnline, mOffline;
 

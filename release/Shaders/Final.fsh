@@ -258,7 +258,7 @@ void main() {
 	color = rayTrace(pos, dir);
 //	color = (shadowTrace(pos, dir) + rayTrace(pos, dir)) / 2.0f;
 	
-//	color = pow(color, vec3(1.0f / 2.2f));
+	color = pow(color, vec3(1.0f / 2.2f)); // Gamma correction
 	
 	if (PathTracing == 0 || SampleCount == 0) FragColor = vec4(color, 1.0f);
     else {

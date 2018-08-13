@@ -36,6 +36,7 @@ void FrameBuffer::create(int width, int height, int col, bool depth) {
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT16, mSize, mSize, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, 0);
 		// Attach
 		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, mDepthTexture, 0);
+		glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, mDepthTexture, 0);
 	} else {
 		// Create depth renderbuffer
 		glGenRenderbuffers(1, &mDepthTexture);
@@ -43,6 +44,7 @@ void FrameBuffer::create(int width, int height, int col, bool depth) {
 		glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, mSize, mSize);
 		// Attach
 		glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mDepthTexture);
+		glFramebufferRenderbuffer(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mDepthTexture);
 	}
 
 	// Create color textures
@@ -56,6 +58,7 @@ void FrameBuffer::create(int width, int height, int col, bool depth) {
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, mSize, mSize, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
 		// Attach
 		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, mColorTextures[i], 0);
+		glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, mColorTextures[i], 0);
 	}
 	
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
@@ -81,11 +84,9 @@ void FrameBuffer::bindBuffer(int index) {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mID);
 	if (mColorAttachCount == 0) {
 		glDrawBuffer(GL_NONE);
-		glReadBuffer(GL_NONE);
 	} else {
 		GLuint arr = GL_COLOR_ATTACHMENT0 + index;
 		glDrawBuffers(1, &arr);
-		glReadBuffer(GL_NONE);
 	}
 }
 
@@ -93,12 +94,20 @@ void FrameBuffer::bind() {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mID);
 	if (mColorAttachCount == 0) {
 		glDrawBuffer(GL_NONE);
-		glReadBuffer(GL_NONE);
 	} else {
 		GLuint arr[16];
 		for (int i = 0; i < mColorAttachCount; i++) arr[i] = GL_COLOR_ATTACHMENT0 + i;
 		glDrawBuffers(mColorAttachCount, arr);
+	}
+}
+
+void FrameBuffer::bindBufferRead(int index) {
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, mID);
+	if (mColorAttachCount == 0) {
 		glReadBuffer(GL_NONE);
+	} else {
+		GLuint arr = GL_COLOR_ATTACHMENT0 + index;
+		glReadBuffer(arr);
 	}
 }
 

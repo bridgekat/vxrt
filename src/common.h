@@ -25,6 +25,7 @@
 constexpr const char* RootPath = "./";
 constexpr const char* ConfigPath = "./";
 constexpr const char* ShaderPath = "./Shaders/";
+constexpr const char* ScreenshotPath = "./Screenshots/";
 constexpr const char* ConfigFilename = "Config.ini";
 
 #endif // !COMMON_H_

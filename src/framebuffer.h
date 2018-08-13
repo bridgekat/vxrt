@@ -18,9 +18,13 @@ public:
 
 	void bindBuffer(int index);
 	void bind();
+	void bindBufferRead(int index);
 	static void unbind() {
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 		glDrawBuffer(GL_BACK);
+	}
+	static void unbindRead() {
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 		glReadBuffer(GL_BACK);
 	}
 

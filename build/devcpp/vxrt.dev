@@ -28,8 +28,8 @@ Folders=
 IncludeVersionInfo=0
 SupportXPThemes=0
 CompilerSet=1
-CompilerSettings=0000000000000000001000000
-UnitCount=29
+CompilerSettings=00000000c0000000001000000
+UnitCount=31
 
 [VersionInfo]
 Major=1
@@ -332,6 +332,26 @@ BuildCmd=
 
 [Unit29]
 FileName=..\..\src\framebuffer.h
+CompileCpp=1
+Folder=
+Compile=1
+Link=1
+Priority=1000
+OverrideBuildCmd=0
+BuildCmd=
+
+[Unit30]
+FileName=..\..\src\bitmap.cpp
+CompileCpp=1
+Folder=
+Compile=1
+Link=1
+Priority=1000
+OverrideBuildCmd=0
+BuildCmd=
+
+[Unit31]
+FileName=..\..\src\bitmap.h
 CompileCpp=1
 Folder=
 Compile=1

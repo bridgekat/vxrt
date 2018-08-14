@@ -249,10 +249,10 @@ void main() {
 //	color = vec3(float(res) / 100.0f);
 	vec3 pos = CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f);
 	
-	vec3 focal = pos + dir * float(RootSize) / 6.0f;
+	vec3 focal = pos + dir * float(RootSize) / 8.0f;
 	vec3 shift = vec3(noise3D(dir + Dither[0]), noise3D(dir + Dither[1]), noise3D(dir + Dither[2])) - vec3(0.5f);
 	shift = normalize(shift - dir * dot(shift, dir));
-	pos += shift * 1.0f;
+	pos += shift * 0.5f;
 	dir = normalize(focal - pos);
 	
 	color = rayTrace(pos, dir);

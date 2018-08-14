@@ -13,7 +13,8 @@
 FrameBuffer fbo[2];
 ShaderProgram presenter;
 int fbWidthDefault = 0, fbHeightDefault = 0;
-int fbWidth, fbHeight;
+int fbWidth, fbHeight, rasterChunks;
+bool preInitFBO;
 
 void enablePathTracing(Window& win) {
 	Renderer::waitForComplete();
@@ -24,16 +25,16 @@ void enablePathTracing(Window& win) {
 		fbWidth = fbWidthDefault;
 		fbHeight = fbHeightDefault;
 	}
-	fbo[0].create(fbWidth, fbHeight, 1, false);
-	fbo[1].create(fbWidth, fbHeight, 1, false);
+	if (!preInitFBO) {
+		fbo[0].create(fbWidth, fbHeight, 1, false);
+		fbo[1].create(fbWidth, fbHeight, 1, false);
+	}
 	Renderer::enableTexture2D();
 	win.unlockCursor();
 }
 
 void disablePathTracing(Window& win) {
 	Renderer::waitForComplete();
-	fbo[0].destroy();
-	fbo[1].destroy();
 	Renderer::disableTexture2D();
 	win.lockCursor();
 }
@@ -55,9 +56,18 @@ int main(){
 
 	Renderer::init();
 	presenter.loadShadersFromFile(std::string(ShaderPath) + "Present.vsh", std::string(ShaderPath) + "Present.fsh");
-
 	fbWidthDefault = Config::getInt("PathTracing.DefaultRenderWidth", 0);
 	fbHeightDefault = Config::getInt("PathTracing.DefaultRenderHeight", 0);
+	rasterChunks = Config::getInt("PathTracing.RasterChunks", 1);
+	if (Config::getInt("PathTracing.PreInitFBOs", 0) == 1) {
+		if (fbWidthDefault > 0 && fbHeightDefault > 0) {
+			preInitFBO = true;
+			LogInfo("Pre-initializing FBOs...");
+			fbo[0].create(fbWidthDefault, fbHeightDefault, 1, false);
+			fbo[1].create(fbWidthDefault, fbHeightDefault, 1, false);
+		}
+	}
+	
 	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
 	tree.generate();
 
@@ -105,14 +115,23 @@ int main(){
 			Renderer::shader().setUniform1i("FrameBufferSize", fbo[curr].size());
 		}
 
-		VertexArray va(6, VertexFormat(0, 0, 0, 2));
-		va.addVertex({-1.0f, 1.0f});
-		va.addVertex({-1.0f,-1.0f});
-		va.addVertex({ 1.0f, 1.0f});
-		va.addVertex({ 1.0f, 1.0f});
-		va.addVertex({-1.0f,-1.0f});
-		va.addVertex({ 1.0f,-1.0f});
-		VertexBuffer(va, false).render();
+		for (int x = 0; x < rasterChunks; x++) {
+			for (int y = 0; y < rasterChunks; y++) {
+				float xmin = 2.0f / rasterChunks * x - 1.0f;
+				float xmax = xmin + 2.0f / rasterChunks;
+				float ymin = 2.0f / rasterChunks * y - 1.0f;
+				float ymax = ymin + 2.0f / rasterChunks;
+				VertexArray va(6, VertexFormat(0, 0, 0, 2));
+				va.addVertex({xmin, ymax});
+				va.addVertex({xmin, ymin});
+				va.addVertex({xmax, ymax});
+				va.addVertex({xmax, ymax});
+				va.addVertex({xmin, ymin});
+				va.addVertex({xmax, ymin});
+				VertexBuffer(va, false).render();
+				Renderer::waitForComplete();
+			}
+		}
 
 		Renderer::endFinalPass();
 
@@ -126,6 +145,13 @@ int main(){
 			presenter.setUniform1i("FrameWidth", fbWidth);
 			presenter.setUniform1i("FrameHeight", fbHeight);
 			presenter.setUniform1i("FrameBufferSize", fbo[curr].size());
+			VertexArray va(6, VertexFormat(0, 0, 0, 2));
+			va.addVertex({-1.0f, 1.0f});
+			va.addVertex({-1.0f,-1.0f});
+			va.addVertex({ 1.0f, 1.0f});
+			va.addVertex({ 1.0f, 1.0f});
+			va.addVertex({-1.0f,-1.0f});
+			va.addVertex({ 1.0f,-1.0f});
 			VertexBuffer(va, false).render();
 			presenter.unbind();
 		}

@@ -36,7 +36,8 @@ void Tree::generateNode(size_t ind, int x0, int y0, int z0, int size) {
 	if (ind >= mNodes.size()) mNodes.resize(ind + 1);
 	if (size == 1) {
 		// Generate single block
-		mNodes[ind].data = (mHeightMap[x0 * mSize + z0] >= y0);
+		double density = WorldGen::getDensity(x0, y0, z0);
+		mNodes[ind].data = WorldGen::getBlock(x0, y0, z0, mHeightMap[x0 * mSize + z0], density);
 		mNodes[ind].leaf = true;
 		// Count
 		mBlocksGenerated++;

@@ -255,7 +255,8 @@ void main() {
 	pos += shift * 0.5f;
 	dir = normalize(focal - pos);
 	
-	color = rayTrace(pos, dir);
+	if (PathTracing == 0) color = shadowTrace(pos, dir);
+	else color = rayTrace(pos, dir);
 //	color = (shadowTrace(pos, dir) + rayTrace(pos, dir)) / 2.0f;
 	
 	color = pow(color, vec3(1.0f / 2.2f)); // Gamma correction

@@ -23,7 +23,35 @@ layout(std430) buffer TreeData {
 in vec2 FragCoords;
 out vec4 FragColor;
 
+// Utility Functions
+
 vec3 divide(vec4 v) { return (v / v.w).xyz; }
+
+// PRNG
+
+uint hash(uint x) {
+	x += x << 10u;
+	x ^= x >> 6u;
+	x += x << 3u;
+	x ^= x >> 11u;
+	x += x << 15u;
+	return x;
+}
+
+uint hash(uvec2 v) { return hash(v.x ^ hash(v.y)); }
+uint hash(uvec3 v) { return hash(v.x ^ hash(v.y) ^ hash(v.z)); }
+uint hash(uvec4 v) { return hash(v.x ^ hash(v.y) ^ hash(v.z) ^ hash(v.w)); }
+
+float constructFloat(uint m) {
+	const uint IEEEMantissa = 0x007FFFFFu;
+	const uint IEEEOne = 0x3F800000u;
+	m = m & IEEEMantissa | IEEEOne;
+	return uintBitsToFloat(m) - 1.0;
+}
+
+float rand(vec3 v) { return constructFloat(hash(floatBitsToUint(vec4(v, RandomSeed)))); }
+
+// Main Part
 
 struct AABB {
 	vec3 a, b;
@@ -35,14 +63,15 @@ bool inside(vec3 a, AABB box) {
 		a.z >= box.a.z && a.z < box.b.z;
 }
 
+const float Pi = 3.14159265f;
 const uint Root = 1u;
 const float Eps = 1e-4;
 const int MaxTracedRays = 16;
-const float DiffuseFactor = 0.05f;
-uint getPrimitiveData(uint ind) { return uint(data[ind]); }
-bool isLeaf(uint ind) { return mod(getPrimitiveData(ind), 2u) != 0u; }
-uint getData(uint ind) { return getPrimitiveData(ind) / 2u; }
-uint getChildrenPtr(uint ind) { return getPrimitiveData(ind) / 2u + Root; }
+const float DiffuseFactor = 1.0f;
+#define getPrimitiveData(ind) uint(data[ind])
+bool isLeaf(uint ind) { return (getPrimitiveData(ind) & 1u) != 0u; }
+uint getData(uint ind) { return getPrimitiveData(ind) >> 1u; }
+uint getChildrenPtr(uint ind) { return (getPrimitiveData(ind) >> 1u) + Root; }
 
 struct Node {
 	uint ptr;
@@ -151,7 +180,8 @@ int marchProfiler(vec3 org, vec3 dir) {
 
 vec3 getSkyColor(in vec3 dir) {
 	vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
-	float sun = mix(0.0f, 0.7f, clamp(smoothstep(0.996f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 4.0f;
+	float sun = mix(0.0f, 0.7f, clamp(smoothstep(0.996f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 40000.0f;
+	/*
 	sun += mix(0.0f, 0.3f, clamp(smoothstep(0.1f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f));
 	vec3 sky = mix(
 		vec3(152.0f / 255.0f, 211.0f / 255.0f, 250.0f / 255.0f),
@@ -159,10 +189,8 @@ vec3 getSkyColor(in vec3 dir) {
 		smoothstep(0.0f, 1.0f, normalize(dir).y * 2.0f)
 	);
 	return mix(sky, vec3(1.0f, 1.0f, 1.0f), sun);
-}
-
-float noise3D(vec3 c) {
-    return fract(sin(dot(c.xyz, vec3(12.9898f, 78.233f + RandomSeed, 233.666f))) * 43758.5453f);
+	*/
+	return vec3(sun);
 }
 
 /*
@@ -186,9 +214,9 @@ vec3 Palette[7] = vec3[7](
 	vec3(0.5f, 0.8f, 0.9f)
 );
 vec3 Dither[3] = vec3[3](
-	vec3(0.1f, 0.13f, 0.99f),
-	vec3(0.13f, 0.1f, 0.99f),
-	vec3(0.99f, 0.1f, 0.13f)
+	vec3(12.1322f, 23.1313423f, 34.959f),
+	vec3(23.183f, 11.232f, 54.9923f),
+	vec3(345.99253f, 2345.2323f, 78.1233f)
 );
 
 vec3 rayTrace(vec3 org, vec3 dir) {
@@ -202,17 +230,27 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 		vec3 col = Palette[p.face];
 		res *= col;
 		org = p.pos;
+		
+		/*
 		vec3 normal = Normal[p.face];
-		vec3 shift = vec3(noise3D(org + Dither[0]), noise3D(org + Dither[1]), noise3D(org + Dither[2])) - vec3(0.5f);
-		shift = normalize(shift) * noise3D(shift);
+		vec3 shift = vec3(rand(org + Dither[0]), rand(org + Dither[1]), rand(org + Dither[2])) - vec3(0.5f);
+		shift = normalize(shift) * rand(shift);
 		normal = normalize(normal + shift * DiffuseFactor);
 		dir = reflect(dir, normal);
+		*/
+		
+		float alpha = acos(rand(org + Dither[0]) * 2.0f - 1.0f);
+		float beta = rand(org + Dither[1]) * 2.0f * Pi;
+		dir = vec3(cos(alpha), sin(alpha) * cos(beta), sin(alpha) * sin(beta));
+		
 		float proj = dot(Normal[p.face], dir);
-		if (proj < 0.0) dir -= 2.0f * proj * Normal[p.face];
+		if (proj < 0.0f) dir -= 2.0f * proj * Normal[p.face], proj *= -1.0f;
+		res *= proj;
+		
 		p.face = BackFace[p.face];
 	}
 	
-	return res;// * getSkyColor(dir);
+	return vec3(0.0f);// * getSkyColor(dir);
 }
 
 vec3 shadowTrace(vec3 org, vec3 dir) {
@@ -240,25 +278,35 @@ vec3 shadowTrace(vec3 org, vec3 dir) {
 	return res;
 }
 
+// Depth of Field
+void apertureDither(inout vec3 pos, inout vec3 dir, float focalDist, float apertureSize) {
+	vec3 focus = pos + dir * focalDist;
+	float r = sqrt(rand(dir)), theta = rand(dir + Dither[0]) * 2.0f * Pi;
+	vec4 shift = vec4(r * cos(theta), r * sin(theta), 0.0f, 1.0f) * apertureSize;
+	pos += (ModelViewInverse * shift).xyz;
+	dir = normalize(focus - pos);
+}
+
 void main() {
-	vec4 fragPosition = ModelViewInverse * ProjectionInverse * vec4(FragCoords, 1.0f, 1.0f);
+	float randx = rand(vec3(FragCoords, 1.0f)) * 2.0f - 1.0f, randy = rand(vec3(FragCoords, -1.0f)) * 2.0f - 1.0f;
+	vec2 ditheredCoords = FragCoords + vec2(randx / float(FrameWidth), randy / float(FrameHeight)); // Anti-aliasing
+	
+	vec4 fragPosition = ModelViewInverse * ProjectionInverse * vec4(ditheredCoords, 1.0f, 1.0f);
+	vec4 centerFragPosition = ModelViewInverse * ProjectionInverse * vec4(0.0f, 0.0f, 1.0f, 1.0f);
+	
 	vec3 dir = normalize(divide(fragPosition));
-	vec3 color = vec3(0.0f);
+	vec3 centerDir = normalize(divide(centerFragPosition));
 	
-//	int res = marchProfiler(CameraPosition + vec3(float(RootSize) / 2.0f + 1e-2), dir);
-//	color = vec3(float(res) / 100.0f);
 	vec3 pos = CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f);
+	apertureDither(pos, dir, float(RootSize) / 8.0f / dot(dir, centerDir), 0.0f);
 	
-	vec3 focal = pos + dir * float(RootSize) / 8.0f;
-	vec3 shift = vec3(noise3D(dir + Dither[0]), noise3D(dir + Dither[1]), noise3D(dir + Dither[2])) - vec3(0.5f);
-	shift = normalize(shift - dir * dot(shift, dir));
-	pos += shift * 0.5f;
-	dir = normalize(focal - pos);
-	
+	vec3 color = vec3(0.0f);
 	if (PathTracing == 0) color = shadowTrace(pos, dir);
 	else color = rayTrace(pos, dir);
 //	color = (shadowTrace(pos, dir) + rayTrace(pos, dir)) / 2.0f;
 	
+//	int res = marchProfiler(pos, dir);
+//	color = vec3(float(res) / 100.0f);
 	color = pow(color, vec3(1.0f / 2.2f)); // Gamma correction
 	
 	if (PathTracing == 0 || SampleCount == 0) FragColor = vec4(color, 1.0f);

@@ -105,7 +105,7 @@ int main(){
 		Renderer::shader().setUniform1i("RootSize", tree.size());
 		Vec3f pos = camera.position();
 		Renderer::shader().setUniform3f("CameraPosition", pos.x, pos.y, pos.z);
-		Renderer::shader().setUniform1f("RandomSeed", float(rand()) / (RAND_MAX + 1.0f));
+		Renderer::shader().setUniform1f("RandomSeed", float(rand() * (RAND_MAX + 1.0f) + rand()) / (RAND_MAX + 1.0f) / (RAND_MAX + 1.0f));
 		Renderer::shader().setUniform1i("PathTracing", int(pathTracing));
 		if (pathTracing) {
 			Renderer::shader().setUniform1i("PrevFrame", 0);
@@ -113,6 +113,9 @@ int main(){
 			Renderer::shader().setUniform1i("FrameWidth", fbWidth);
 			Renderer::shader().setUniform1i("FrameHeight", fbHeight);
 			Renderer::shader().setUniform1i("FrameBufferSize", fbo[curr].size());
+		} else {
+			Renderer::shader().setUniform1i("FrameWidth", win.getWidth());
+			Renderer::shader().setUniform1i("FrameHeight", win.getHeight());
 		}
 
 		for (int x = 0; x < rasterChunks; x++) {

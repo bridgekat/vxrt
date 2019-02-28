@@ -360,3 +360,23 @@ Priority=1000
 OverrideBuildCmd=0
 BuildCmd=
 
+[Unit32]
+FileName=..\..\src\thread.h
+CompileCpp=1
+Folder=
+Compile=1
+Link=1
+Priority=1000
+OverrideBuildCmd=0
+BuildCmd=
+
+[Unit33]
+FileName=..\..\src\thread.cpp
+CompileCpp=1
+Folder=
+Compile=1
+Link=1
+Priority=1000
+OverrideBuildCmd=0
+BuildCmd=
+

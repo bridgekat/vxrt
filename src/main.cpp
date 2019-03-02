@@ -10,6 +10,8 @@
 #include "updatescheduler.h"
 #include "bitmap.h"
 
+const float Gamma = 2.2f;
+
 FrameBuffer fbo[2];
 ShaderProgram presenter;
 int fbWidthDefault = 0, fbHeightDefault = 0;
@@ -79,6 +81,7 @@ int main(){
 
 	UpdateScheduler frameCounterScheduler(1);
 	int frameCounter = 0;
+	double startTime = UpdateScheduler::timeFromEpoch();
 
 	bool pathTracing = false;
 
@@ -87,6 +90,7 @@ int main(){
 		Renderer::checkError();
 		win.swapBuffers();
 
+		// Init rendering
 		int curr = frameCounter & 1;
 
 		if (!pathTracing) {
@@ -102,6 +106,7 @@ int main(){
 		Renderer::setProjection(camera.getProjectionMatrix());
 		Renderer::setModelview(camera.getModelViewMatrix());
 
+		// Init shaders
 		Renderer::shader().setUniform1i("RootSize", tree.size());
 		Vec3f pos = camera.position();
 		Renderer::shader().setUniform3f("CameraPosition", pos.x, pos.y, pos.z);
@@ -118,6 +123,7 @@ int main(){
 			Renderer::shader().setUniform1i("FrameHeight", win.getHeight());
 		}
 
+		// Render scene (sample once for each pixel)
 		for (int x = 0; x < rasterChunks; x++) {
 			for (int y = 0; y < rasterChunks; y++) {
 				float xmin = 2.0f / rasterChunks * x - 1.0f;
@@ -139,6 +145,7 @@ int main(){
 		Renderer::endFinalPass();
 
 		if (pathTracing) {
+			// Present to screen
 			fbo[curr].unbind();
 			fbo[curr].bindColorTextures(0);
 			presenter.bind();
@@ -159,12 +166,13 @@ int main(){
 			presenter.unbind();
 		}
 
+		// Update FPS
 		frameCounter++;
 		frameCounterScheduler.refresh();
 		while (!frameCounterScheduler.inSync()) {
 			std::stringstream ss;
 			if (!pathTracing) {
-				ss << "Voxel Raytracing Test (Static SVO, " << frameCounter << " fps)";
+				ss << "Voxel Raycasting Test (Static SVO, " << frameCounter << " fps)";
 				frameCounter = 0;
 			} else {
 				ss << "Voxel Pathtracing Test (Static SVO, " << frameCounter << " samples per pixel)";
@@ -175,16 +183,27 @@ int main(){
 
 		win.pollEvents();
 		
+		// Screenshot
 		static bool opressed = false;
 		if (Window::isKeyPressed(SDL_SCANCODE_O)) {
 			if (!opressed) {
 				if (pathTracing) {
+					// Read data
 					fbo[curr].bindBufferRead(0);
 					Bitmap bmp(fbWidth, fbHeight, Vec3i(0, 0, 0));
 					glReadPixels(0, 0, fbWidth, fbHeight, GL_RGB, GL_UNSIGNED_BYTE, bmp.data);
 					fbo[curr].unbindRead();
+					// Gamma correction
+					for (int i = 0; i < bmp.h; i++) for (int j = 0; j < bmp.w; j++) {
+						Vec3f col = Vec3f(bmp.getPixel(j, i)) / 255.0f;
+						col.x = pow(col.x, 1.0f / Gamma);
+						col.y = pow(col.y, 1.0f / Gamma);
+						col.z = pow(col.z, 1.0f / Gamma);
+						bmp.setPixel(j, i, Vec3i(col * 255.0f));
+					}
+					// Save file
 					std::stringstream ss, sss;
-					ss << ScreenshotPath << UpdateScheduler::timeFromEpoch() << "-" << frameCounter << "spp.bmp";
+					ss << ScreenshotPath << UpdateScheduler::timeFromEpoch() - startTime << "s-" << frameCounter << "spp.bmp";
 					bmp.save(ss.str());
 					sss << "Saved screenshot " << ss.str();
 					LogInfo(sss.str());
@@ -193,6 +212,7 @@ int main(){
 			opressed = true;
 		} else opressed = false;
 
+		// Switches
 		static bool lpressed = false;
 		if (Window::isKeyPressed(SDL_SCANCODE_L)) {
 			if (!lpressed) {
@@ -225,7 +245,8 @@ int main(){
 			}
 			ppressed = true;
 		} else ppressed = false;
-		
+
+		// Camera parameters
 		if (!pathTracing) {
 			camera.setPerspective(70.0f, float(win.getWidth()) / float(win.getHeight()), 0.1f, 256.0f);
 			camera.update(win);

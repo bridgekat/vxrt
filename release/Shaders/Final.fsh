@@ -23,7 +23,13 @@ layout(std430) buffer TreeData {
 in vec2 FragCoords;
 out vec4 FragColor;
 
-// Utility Functions
+// Constants
+
+const float Eps = 1e-4;
+const float Pi = 3.14159265f;
+const float Gamma = 2.2f;
+
+// Utilities
 
 vec3 divide(vec4 v) { return (v / v.w).xyz; }
 
@@ -63,11 +69,10 @@ bool inside(vec3 a, AABB box) {
 		a.z >= box.a.z && a.z < box.b.z;
 }
 
-const float Pi = 3.14159265f;
 const uint Root = 1u;
-const float Eps = 1e-4;
 const int MaxTracedRays = 16;
 const float DiffuseFactor = 1.0f;
+
 #define getPrimitiveData(ind) uint(data[ind])
 bool isLeaf(uint ind) { return (getPrimitiveData(ind) & 1u) != 0u; }
 uint getData(uint ind) { return getPrimitiveData(ind) >> 1u; }
@@ -180,8 +185,8 @@ int marchProfiler(vec3 org, vec3 dir) {
 
 vec3 getSkyColor(in vec3 dir) {
 	vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
-	float sun = mix(0.0f, 0.7f, clamp(smoothstep(0.996f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 40000.0f;
-	/*
+	float sun = mix(0.0f, 0.7f, clamp(smoothstep(0.996f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 4.0f;
+//	/*
 	sun += mix(0.0f, 0.3f, clamp(smoothstep(0.1f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f));
 	vec3 sky = mix(
 		vec3(152.0f / 255.0f, 211.0f / 255.0f, 250.0f / 255.0f),
@@ -189,7 +194,7 @@ vec3 getSkyColor(in vec3 dir) {
 		smoothstep(0.0f, 1.0f, normalize(dir).y * 2.0f)
 	);
 	return mix(sky, vec3(1.0f, 1.0f, 1.0f), sun);
-	*/
+//	*/
 	return vec3(sun);
 }
 
@@ -227,6 +232,11 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 	for (int i = 0; i < MaxTracedRays; i++) {
 		p = rayMarch(p, dir);
 		if (p.face == 0) return res * getSkyColor(dir);
+		
+		const float P = 0.2f;
+		if (rand(p.pos) <= P) return vec3(0.0f);
+		res /= (1.0f - P);
+		
 		vec3 col = Palette[p.face];
 		res *= col;
 		org = p.pos;
@@ -239,8 +249,8 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 		dir = reflect(dir, normal);
 		*/
 		
-		float alpha = acos(rand(org + Dither[0]) * 2.0f - 1.0f);
-		float beta = rand(org + Dither[1]) * 2.0f * Pi;
+		float alpha = acos(rand(org + Dither[1]) * 2.0f - 1.0f);
+		float beta = rand(org + Dither[2]) * 2.0f * Pi;
 		dir = vec3(cos(alpha), sin(alpha) * cos(beta), sin(alpha) * sin(beta));
 		
 		float proj = dot(Normal[p.face], dir);
@@ -307,9 +317,9 @@ void main() {
 	
 //	int res = marchProfiler(pos, dir);
 //	color = vec3(float(res) / 100.0f);
-	color = pow(color, vec3(1.0f / 2.2f)); // Gamma correction
 	
-	if (PathTracing == 0 || SampleCount == 0) FragColor = vec4(color, 1.0f);
+	if (PathTracing == 0) FragColor = vec4(pow(color, vec3(1.0f / Gamma)), 1.0f);
+	else if (SampleCount == 0) FragColor = vec4(color, 1.0f);
     else {
 		vec2 texCoord = FragCoords / 2.0f + vec2(0.5f);
 		texCoord *= vec2(float(FrameWidth), float(FrameHeight)) / vec2(float(FrameBufferSize));

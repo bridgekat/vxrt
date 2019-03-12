@@ -74,7 +74,7 @@ void ShaderProgram::loadShadersFromFile(const std::string& vertex, const std::st
 void ShaderProgram::setUniform1f(const std::string& uniform, float v0) {
 	int loc = getUniformLocation(uniform);
 	if (loc == -1) {
-//		LogWarning("Shader uniform variable not found: " + uniform);
+//		LogVerbose("Shader uniform variable not found: " + uniform);
 		return;
 	}
 	glUniform1f(loc, v0);
@@ -83,7 +83,7 @@ void ShaderProgram::setUniform1f(const std::string& uniform, float v0) {
 void ShaderProgram::setUniform2f(const std::string& uniform, float v0, float v1) {
 	int loc = getUniformLocation(uniform);
 	if (loc == -1) {
-//		LogWarning("Shader uniform variable not found: " + uniform);
+//		LogVerbose("Shader uniform variable not found: " + uniform);
 		return;
 	}
 	glUniform2f(loc, v0, v1);
@@ -92,7 +92,7 @@ void ShaderProgram::setUniform2f(const std::string& uniform, float v0, float v1)
 void ShaderProgram::setUniform3f(const std::string& uniform, float v0, float v1, float v2) {
 	int loc = getUniformLocation(uniform);
 	if (loc == -1) {
-//		LogWarning("Shader uniform variable not found: " + uniform);
+//		LogVerbose("Shader uniform variable not found: " + uniform);
 		return;
 	}
 	glUniform3f(loc, v0, v1, v2);
@@ -101,7 +101,7 @@ void ShaderProgram::setUniform3f(const std::string& uniform, float v0, float v1,
 void ShaderProgram::setUniform4f(const std::string& uniform, float v0, float v1, float v2, float v3) {
 	int loc = getUniformLocation(uniform);
 	if (loc == -1) {
-//		LogWarning("Shader uniform variable not found: " + uniform);
+//		LogVerbose("Shader uniform variable not found: " + uniform);
 		return;
 	}
 	glUniform4f(loc, v0, v1, v2, v3);
@@ -110,7 +110,7 @@ void ShaderProgram::setUniform4f(const std::string& uniform, float v0, float v1,
 void ShaderProgram::setUniform1i(const std::string& uniform, int v0) {
 	int loc = getUniformLocation(uniform);
 	if (loc == -1) {
-//		LogWarning("Shader uniform variable not found: " + uniform);
+//		LogVerbose("Shader uniform variable not found: " + uniform);
 		return;
 	}
 	glUniform1i(loc, v0);
@@ -119,7 +119,7 @@ void ShaderProgram::setUniform1i(const std::string& uniform, int v0) {
 void ShaderProgram::setUniform1ui(const std::string& uniform, unsigned int v0) {
 	int loc = getUniformLocation(uniform);
 	if (loc == -1) {
-//		LogWarning("Shader uniform variable not found: " + uniform);
+//		LogVerbose("Shader uniform variable not found: " + uniform);
 		return;
 	}
 	glUniform1ui(loc, v0);
@@ -128,7 +128,7 @@ void ShaderProgram::setUniform1ui(const std::string& uniform, unsigned int v0) {
 void ShaderProgram::setUniformMatrix4fv(const std::string& uniform, float* v0) {
 	int loc = getUniformLocation(uniform);
 	if (loc == -1) {
-//		LogWarning("Shader uniform variable not found: " + uniform);
+//		LogVerbose("Shader uniform variable not found: " + uniform);
 		return;
 	}
 	glUniformMatrix4fv(loc, 1, GL_FALSE, v0);

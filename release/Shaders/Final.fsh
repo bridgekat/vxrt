@@ -8,6 +8,9 @@ uniform mat4 ModelViewInverse;
 uniform int RootSize;
 uniform vec3 CameraPosition;
 uniform float RandomSeed;
+uniform sampler2D NoiseTexture;
+uniform float NoiseTextureSize;
+uniform vec2 NoiseOffset;
 
 uniform int PathTracing;
 uniform sampler2D PrevFrame;
@@ -28,6 +31,7 @@ out vec4 FragColor;
 const float Eps = 1e-4;
 const float Pi = 3.14159265f;
 const float Gamma = 2.2f;
+const vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
 
 // Utilities
 
@@ -45,17 +49,93 @@ uint hash(uint x) {
 }
 
 uint hash(uvec2 v) { return hash(v.x ^ hash(v.y)); }
-uint hash(uvec3 v) { return hash(v.x ^ hash(v.y) ^ hash(v.z)); }
-uint hash(uvec4 v) { return hash(v.x ^ hash(v.y) ^ hash(v.z) ^ hash(v.w)); }
+uint hash(uvec3 v) { return hash(v.x ^ hash(v.yz)); }
+uint hash(uvec4 v) { return hash(v.x ^ hash(v.yzw)); }
 
 float constructFloat(uint m) {
 	const uint IEEEMantissa = 0x007FFFFFu;
 	const uint IEEEOne = 0x3F800000u;
 	m = m & IEEEMantissa | IEEEOne;
-	return uintBitsToFloat(m) - 1.0;
+	return uintBitsToFloat(m) - 1.0f;
 }
 
 float rand(vec3 v) { return constructFloat(hash(floatBitsToUint(vec4(v, RandomSeed)))); }
+
+// Fractal Noise
+
+float interpolatedNoise3D(in vec3 x) {
+	vec3 p = floor(x), f = fract(x);
+	vec2 uv = (p.xy + NoiseOffset * p.z) + f.xy;
+	vec2 v = texture2D(NoiseTexture, uv / NoiseTextureSize).rb;
+	return mix(v.x, v.y, f.z);
+}
+
+float fractalNoise3D(in vec3 c) {
+	float res = 0.0f;
+	res += interpolatedNoise3D(c * 1.0f) / 1.0f;
+	res += interpolatedNoise3D(c * 2.0f) / 2.0f;
+	res += interpolatedNoise3D(c * 4.0f) / 4.0f;
+	res += interpolatedNoise3D(c * 8.0f) / 8.0f;
+	res += interpolatedNoise3D(c * 16.0f) / 16.0f;
+	res += interpolatedNoise3D(c * 32.0f) / 32.0f;
+//	res += interpolatedNoise3D(c * 64.0f) / 64.0f;
+//	res += interpolatedNoise3D(c * 128.0f) / 128.0f;
+	res = clamp(abs(res - 0.5f) * 2.0f - 0.8f, 0.0f, 1.0f);
+//	res = clamp(abs(res / 2.0f * 2.0f - 1.0f) * 2.0f - 0.2f, 0.0f, 1.0f);
+//	return res < 0.5f ? 0.0f : 1.0f;
+	return res < 0.3f ? clamp((res - 0.3f) * 4.0f + 0.3f, 0.0f, 1.0f) : res;
+}
+
+// Volumetric Clouds
+
+const vec3 CloudScale = vec3(200.0, 120.0, 200.0);
+const float CloudBottom = 100.0, CloudTop = 800.0, CloudTransition = 200.0;
+const int CloudIterations = 64;
+const float CloudStep = 16.0, CloudDistance = 4000.0;
+
+float getCloudOpacity(in vec3 pos) {
+	float factor = min(
+		smoothstep(CloudBottom, CloudBottom + CloudTransition, pos.y),
+		1.0 - smoothstep(CloudTop - CloudTransition, CloudTop, pos.y)
+	);
+	return factor * 0.3 * fractalNoise3D(pos / CloudScale);
+}
+
+vec4 cloud(in vec3 org, in vec3 dir, in float stp, in float maxDist) {
+	vec3 curr = org;
+	vec3 res = vec3(0.0);
+	float transparency = 1.0;
+	
+	dir = normalize(dir);
+	
+	if (curr.y < CloudBottom) {
+		if (dir.y <= 0.0) return vec4(0.0);
+		curr += dir * (CloudBottom - curr.y) / dir.y;
+	} else if (curr.y > CloudTop) {
+		if (dir.y >= 0.0) return vec4(0.0);
+		curr += dir * (CloudTop - curr.y) / dir.y;
+	}
+	
+	for (int i = 0; i < CloudIterations; i++) {
+		curr += dir * stp;
+		
+		if (transparency < 0.01) break;
+		if (length(curr - org) > maxDist) break;
+		
+		if (curr.y >= CloudBottom && curr.y <= CloudTop) {
+			float factor = smoothstep(-maxDist, -maxDist * 0.6, -length(curr - org));
+			float opacity = factor * getCloudOpacity(curr) * 0.5;
+			if (opacity > 0.0) {
+				float occulusion = getCloudOpacity(curr - SunlightDirection * stp * 4.0);
+				float col = clamp(1.2 - occulusion * 0.8, 0.6, 1.0);
+				res += transparency * opacity * vec3(col);
+				transparency *= 1.0 - opacity;
+			}
+		} else break;
+	}
+	
+	return vec4(res, 1.0 - transparency);
+}
 
 // Main Part
 
@@ -71,7 +151,8 @@ bool inside(vec3 a, AABB box) {
 
 const uint Root = 1u;
 const int MaxTracedRays = 16;
-const float DiffuseFactor = 1.0f;
+//const float DiffuseFactor = 1.0f;
+#define LAMBERTIAN_DIFFUSE
 
 #define getPrimitiveData(ind) uint(data[ind])
 bool isLeaf(uint ind) { return (getPrimitiveData(ind) & 1u) != 0u; }
@@ -132,7 +213,7 @@ Intersection innerIntersect(vec3 org, vec3 dir, AABB box, int ignore) {
 	scale[5] = (box.a.z - org.z) / dir.z; // z-
 	scale[6] = (box.b.z - org.z) / dir.z; // z+
 	int face = 0;
-	for (int i = 1; i <= 6; i++) if (/*dot(dir, Normal[i]) < 0.0f && */i != ignore && scale[i] > 0.0f) {
+	for (int i = 1; i <= 6; i++) if (dot(dir, Normal[i]) < 0.0f && scale[i] > 0.0f) {
 		if (face == 0 || scale[i] < scale[face]) face = i;
 	}
 	return Intersection(org + dir * scale[face], face);
@@ -183,41 +264,43 @@ int marchProfiler(vec3 org, vec3 dir) {
 	return RootSize;
 }
 
-vec3 getSkyColor(in vec3 dir) {
-	vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
+vec3 getSkyColor(in vec3 org, in vec3 dir) {
+//	return vec3(1.0f);
 	float sun = mix(0.0f, 0.7f, clamp(smoothstep(0.996f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 4.0f;
-//	/*
 	sun += mix(0.0f, 0.3f, clamp(smoothstep(0.1f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f));
 	vec3 sky = mix(
 		vec3(152.0f / 255.0f, 211.0f / 255.0f, 250.0f / 255.0f),
 		vec3(90.0f / 255.0f, 134.0f / 255.0f, 206.0f / 255.0f),
 		smoothstep(0.0f, 1.0f, normalize(dir).y * 2.0f)
 	);
-	return mix(sky, vec3(1.0f, 1.0f, 1.0f), sun);
-//	*/
-	return vec3(sun);
+	vec3 res = mix(sky, vec3(1.0f, 1.0f, 1.0f), sun);
+	vec4 cloudColor = cloud(org, dir, CloudStep, CloudDistance);
+	res = cloudColor.rgb + (1.0 - cloudColor.a) * res;
+	return res;
 }
 
+///*
+vec3 Palette[7] = vec3[7](
+	vec3(0.0f, 0.0f, 0.0f),
+	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(151.0f, 228.0f, 90.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(144.0f, 105.0f, 64.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma))
+);
+//*/
 /*
 vec3 Palette[7] = vec3[7](
 	vec3(0.0f, 0.0f, 0.0f),
-	vec3(147.5f, 166.4f, 77.0f) / 255.0f,
-	vec3(147.5f, 166.4f, 77.0f) / 255.0f,
-	vec3(151.0f, 228.0f, 90.0f) / 255.0f,
-	vec3(144.0f, 105.0f, 64.0f) / 255.0f,
-	vec3(147.5f, 166.4f, 77.0f) / 255.0f,
-	vec3(147.5f, 166.4f, 77.0f) / 255.0f
+	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
+	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
+	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
+	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
+	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
+	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma))
 );
 */
-vec3 Palette[7] = vec3[7](
-	vec3(0.0f, 0.0f, 0.0f),
-	vec3(0.5f, 0.8f, 0.9f),
-	vec3(0.5f, 0.8f, 0.9f),
-	vec3(0.5f, 0.8f, 0.9f),
-	vec3(0.5f, 0.8f, 0.9f),
-	vec3(0.5f, 0.8f, 0.9f),
-	vec3(0.5f, 0.8f, 0.9f)
-);
 vec3 Dither[3] = vec3[3](
 	vec3(12.1322f, 23.1313423f, 34.959f),
 	vec3(23.183f, 11.232f, 54.9923f),
@@ -231,7 +314,7 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 	
 	for (int i = 0; i < MaxTracedRays; i++) {
 		p = rayMarch(p, dir);
-		if (p.face == 0) return res * getSkyColor(dir);
+		if (p.face == 0) return res * getSkyColor(org, dir);
 		
 		const float P = 0.2f;
 		if (rand(p.pos) <= P) return vec3(0.0f);
@@ -241,17 +324,17 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 		res *= col;
 		org = p.pos;
 		
-		/*
+#ifdef LAMBERTIAN_DIFFUSE
+		float alpha = acos(rand(org + Dither[1]) * 2.0f - 1.0f);
+		float beta = rand(org + Dither[2]) * 2.0f * Pi;
+		dir = vec3(cos(alpha), sin(alpha) * cos(beta), sin(alpha) * sin(beta));
+#else
 		vec3 normal = Normal[p.face];
 		vec3 shift = vec3(rand(org + Dither[0]), rand(org + Dither[1]), rand(org + Dither[2])) - vec3(0.5f);
 		shift = normalize(shift) * rand(shift);
 		normal = normalize(normal + shift * DiffuseFactor);
 		dir = reflect(dir, normal);
-		*/
-		
-		float alpha = acos(rand(org + Dither[1]) * 2.0f - 1.0f);
-		float beta = rand(org + Dither[2]) * 2.0f * Pi;
-		dir = vec3(cos(alpha), sin(alpha) * cos(beta), sin(alpha) * sin(beta));
+#endif
 		
 		float proj = dot(Normal[p.face], dir);
 		if (proj < 0.0f) dir -= 2.0f * proj * Normal[p.face], proj *= -1.0f;
@@ -260,7 +343,7 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 		p.face = BackFace[p.face];
 	}
 	
-	return vec3(0.0f);// * getSkyColor(dir);
+	return vec3(0.0f);
 }
 
 vec3 shadowTrace(vec3 org, vec3 dir) {
@@ -268,7 +351,7 @@ vec3 shadowTrace(vec3 org, vec3 dir) {
 	Intersection p = Intersection(org, 0);
 	
 	p = rayMarch(p, dir);
-	if (p.face == 0) return res * getSkyColor(dir);
+	if (p.face == 0) return res * getSkyColor(org, dir);
 	
 	vec3 col = Palette[p.face];
 	res *= col;
@@ -308,15 +391,12 @@ void main() {
 	vec3 centerDir = normalize(divide(centerFragPosition));
 	
 	vec3 pos = CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f);
-	apertureDither(pos, dir, float(RootSize) / 8.0f / dot(dir, centerDir), 0.0f);
+	apertureDither(pos, dir, float(RootSize) / 6.0f / dot(dir, centerDir), 1.0f);
 	
 	vec3 color = vec3(0.0f);
 	if (PathTracing == 0) color = shadowTrace(pos, dir);
 	else color = rayTrace(pos, dir);
-//	color = (shadowTrace(pos, dir) + rayTrace(pos, dir)) / 2.0f;
-	
-//	int res = marchProfiler(pos, dir);
-//	color = vec3(float(res) / 100.0f);
+//	color = vec3(float(marchProfiler(pos, dir)) / 100.0f);
 	
 	if (PathTracing == 0) FragColor = vec4(pow(color, vec3(1.0f / Gamma)), 1.0f);
 	else if (SampleCount == 0) FragColor = vec4(color, 1.0f);

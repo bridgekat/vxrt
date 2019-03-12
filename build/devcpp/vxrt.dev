@@ -29,7 +29,7 @@ IncludeVersionInfo=0
 SupportXPThemes=0
 CompilerSet=0
 CompilerSettings=00011jcac0000000000000000
-UnitCount=31
+UnitCount=33
 
 [VersionInfo]
 Major=1
@@ -360,8 +360,8 @@ Priority=1000
 OverrideBuildCmd=0
 BuildCmd=
 
-[Unit32]
-FileName=..\..\src\thread.h
+[Unit33]
+FileName=..\..\src\texture.h
 CompileCpp=1
 Folder=
 Compile=1
@@ -370,8 +370,8 @@ Priority=1000
 OverrideBuildCmd=0
 BuildCmd=
 
-[Unit33]
-FileName=..\..\src\thread.cpp
+[Unit32]
+FileName=..\..\src\texture.cpp
 CompileCpp=1
 Folder=
 Compile=1

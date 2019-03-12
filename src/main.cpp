@@ -9,6 +9,7 @@
 #include "framebuffer.h"
 #include "updatescheduler.h"
 #include "bitmap.h"
+#include "texture.h"
 
 const float Gamma = 2.2f;
 
@@ -70,11 +71,25 @@ int main(){
 		}
 	}
 	
+	// Init voxels
 	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
 	tree.generate();
 
 	ShaderBuffer ssbo(Renderer::shader(), "TreeData", 0);
 	tree.upload(ssbo);
+	
+	// Init noise
+	const int NoiseTextureSize = 256, OffsetX = 37, OffsetY = 17;
+	TextureImage noiseImage(NoiseTextureSize, NoiseTextureSize, 4);
+	srand(2333);
+	for (int x = 0; x < NoiseTextureSize; x++) for (int y = 0; y < NoiseTextureSize; y++) {
+		int x1 = (x + OffsetX) % NoiseTextureSize, y1 = (y + OffsetY) % NoiseTextureSize;
+		noiseImage.color(x, y, 2) = noiseImage.color(x1, y1, 0) = rand() % 256;
+		noiseImage.color(x, y, 3) = noiseImage.color(x1, y1, 1) = rand() % 256;
+	}
+	Texture noiseTexture(noiseImage, true, 0);
+	int noiseTextureIndex = 7;
+	noiseTexture.bind(noiseTextureIndex);
 
 	Camera camera;
 	win.lockCursor();
@@ -92,7 +107,6 @@ int main(){
 
 		// Init rendering
 		int curr = frameCounter & 1;
-
 		if (!pathTracing) {
 			Renderer::setRenderArea(0, 0, win.getWidth(), win.getHeight());
 		} else {
@@ -101,16 +115,19 @@ int main(){
 			Renderer::setRenderArea(0, 0, fbWidth, fbHeight);
 		}
 		Renderer::clear();
-
 		Renderer::beginFinalPass();
 		Renderer::setProjection(camera.getProjectionMatrix());
 		Renderer::setModelview(camera.getModelViewMatrix());
 
 		// Init shaders
+		noiseTexture.bind(noiseTextureIndex);
 		Renderer::shader().setUniform1i("RootSize", tree.size());
 		Vec3f pos = camera.position();
 		Renderer::shader().setUniform3f("CameraPosition", pos.x, pos.y, pos.z);
 		Renderer::shader().setUniform1f("RandomSeed", float(rand() * (RAND_MAX + 1.0f) + rand()) / (RAND_MAX + 1.0f) / (RAND_MAX + 1.0f));
+		Renderer::shader().setUniform1i("NoiseTexture", noiseTextureIndex);
+		Renderer::shader().setUniform1f("NoiseTextureSize", NoiseTextureSize);
+		Renderer::shader().setUniform2f("NoiseOffset", OffsetX, OffsetY);
 		Renderer::shader().setUniform1i("PathTracing", int(pathTracing));
 		if (pathTracing) {
 			Renderer::shader().setUniform1i("PrevFrame", 0);
@@ -124,7 +141,7 @@ int main(){
 		}
 
 		// Render scene (sample once for each pixel)
-		for (int x = 0; x < rasterChunks; x++) {
+		for (int x = 0; x < rasterChunks; x++) { // Prevent from crashing (timeout)...
 			for (int y = 0; y < rasterChunks; y++) {
 				float xmin = 2.0f / rasterChunks * x - 1.0f;
 				float xmax = xmin + 2.0f / rasterChunks;
@@ -138,7 +155,7 @@ int main(){
 				va.addVertex({xmin, ymin});
 				va.addVertex({xmax, ymin});
 				VertexBuffer(va, false).render();
-				Renderer::waitForComplete();
+				if (rasterChunks != 1) Renderer::waitForComplete();
 			}
 		}
 
@@ -203,7 +220,7 @@ int main(){
 					}
 					// Save file
 					std::stringstream ss, sss;
-					ss << ScreenshotPath << UpdateScheduler::timeFromEpoch() - startTime << "s-" << frameCounter << "spp.bmp";
+					ss << ScreenshotPath << fbWidth << "x" << fbHeight << "-" << frameCounter << "spp-" << UpdateScheduler::timeFromEpoch() - startTime << "s.bmp";
 					bmp.save(ss.str());
 					sss << "Saved screenshot " << ss.str();
 					LogInfo(sss.str());

@@ -54,13 +54,8 @@ public:
 		updateMatrices();
 	}
 
-	static void enableTexture2D() {
-		if (!OpenGL::coreProfile()) glEnable(GL_TEXTURE_2D);
-		else glActiveTexture(GL_TEXTURE0);
-	}
-	static void disableTexture2D() {
-		if (!OpenGL::coreProfile()) glDisable(GL_TEXTURE_2D);
-	}
+	static void enableTexture2D() { if (!OpenGL::coreProfile()) glEnable(GL_TEXTURE_2D); }
+	static void disableTexture2D() { if (!OpenGL::coreProfile()) glDisable(GL_TEXTURE_2D); }
 	static void enableDepthOverwrite() { glDepthFunc(GL_ALWAYS); }
 	static void disableDepthOverwrite() { glDepthFunc(GL_LEQUAL); }
 	static void enableDepthTest() { glEnable(GL_DEPTH_TEST); }

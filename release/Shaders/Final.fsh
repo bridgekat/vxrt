@@ -32,6 +32,7 @@ const float Eps = 1e-4;
 const float Pi = 3.14159265f;
 const float Gamma = 2.2f;
 const vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
+const float SunlightAngle = 0.996f;
 
 // Utilities
 
@@ -150,7 +151,7 @@ bool inside(vec3 a, AABB box) {
 }
 
 const uint Root = 1u;
-const int MaxTracedRays = 16;
+const int MaxTracedRays = 4;
 //const float DiffuseFactor = 1.0f;
 #define LAMBERTIAN_DIFFUSE
 
@@ -266,7 +267,8 @@ int marchProfiler(vec3 org, vec3 dir) {
 
 vec3 getSkyColor(in vec3 org, in vec3 dir) {
 //	return vec3(1.0f);
-	float sun = mix(0.0f, 0.7f, clamp(smoothstep(0.996f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 4.0f;
+	float sun = mix(0.0f, 0.7f, clamp(smoothstep(SunlightAngle, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 400.0f;
+	return vec3(sun);
 	sun += mix(0.0f, 0.3f, clamp(smoothstep(0.1f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f));
 	vec3 sky = mix(
 		vec3(152.0f / 255.0f, 211.0f / 255.0f, 250.0f / 255.0f),
@@ -279,7 +281,7 @@ vec3 getSkyColor(in vec3 org, in vec3 dir) {
 	return res;
 }
 
-///*
+/*
 vec3 Palette[7] = vec3[7](
 	vec3(0.0f, 0.0f, 0.0f),
 	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
@@ -289,8 +291,8 @@ vec3 Palette[7] = vec3[7](
 	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
 	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma))
 );
-//*/
-/*
+*/
+///*
 vec3 Palette[7] = vec3[7](
 	vec3(0.0f, 0.0f, 0.0f),
 	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
@@ -300,7 +302,7 @@ vec3 Palette[7] = vec3[7](
 	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
 	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma))
 );
-*/
+//*/
 vec3 Dither[3] = vec3[3](
 	vec3(12.1322f, 23.1313423f, 34.959f),
 	vec3(23.183f, 11.232f, 54.9923f),
@@ -325,9 +327,22 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 		org = p.pos;
 		
 #ifdef LAMBERTIAN_DIFFUSE
+		const float Pr = (dot(Normal[p.face], -SunlightDirection) > 0.1f ? 0.1f : 0.0f);
+		bool towardsSun = (rand(org + Dither[0]) <= Pr);
+		float pdf = 1.0f - Pr;
+		
 		float alpha = acos(rand(org + Dither[1]) * 2.0f - 1.0f);
+		if (towardsSun) alpha = acos(1.0f - rand(org + Dither[1]) * (1.0f - SunlightAngle));
 		float beta = rand(org + Dither[2]) * 2.0f * Pi;
 		dir = vec3(cos(alpha), sin(alpha) * cos(beta), sin(alpha) * sin(beta));
+		
+		if (towardsSun) {
+			vec3 tangent = normalize(cross(-SunlightDirection, vec3(1.0f, 0.0f, 0.0f)));
+			vec3 bitangent = cross(-SunlightDirection, tangent);
+			dir = mat3(-SunlightDirection, tangent, bitangent) * dir;
+			pdf += Pr / (1.0f - SunlightAngle);
+		}
+		res /= pdf;
 #else
 		vec3 normal = Normal[p.face];
 		vec3 shift = vec3(rand(org + Dither[0]), rand(org + Dither[1]), rand(org + Dither[2])) - vec3(0.5f);
@@ -391,7 +406,7 @@ void main() {
 	vec3 centerDir = normalize(divide(centerFragPosition));
 	
 	vec3 pos = CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f);
-	apertureDither(pos, dir, float(RootSize) / 6.0f / dot(dir, centerDir), 1.0f);
+	apertureDither(pos, dir, float(RootSize) / 6.0f / dot(dir, centerDir), 0.0f);
 	
 	vec3 color = vec3(0.0f);
 	if (PathTracing == 0) color = shadowTrace(pos, dir);

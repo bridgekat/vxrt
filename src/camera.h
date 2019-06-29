@@ -48,7 +48,7 @@ public:
 		if (Window::isKeyPressed(SDL_SCANCODE_A)) moveOriented(Vec3d(-0.5, 0.0, 0.0), Vec3i(0, 1, 0));
 		if (Window::isKeyPressed(SDL_SCANCODE_D)) moveOriented(Vec3d(0.5, 0.0, 0.0), Vec3i(0, 1, 0));
 		if (Window::isKeyPressed(SDL_SCANCODE_SPACE)) moveOriented(Vec3d(0.0, 0.5, 0.0), Vec3i(0, 1, 0));
-		if (Window::isKeyPressed(SDL_SCANCODE_LCTRL) || Window::isKeyPressed(SDL_SCANCODE_RCTRL)) moveOriented(Vec3d(0.0, -0.5, 0.0), Vec3i(0, 1, 0));
+		if (Window::isKeyPressed(SDL_SCANCODE_LCTRL) || Window::isKeyPressed(SDL_SCANCODE_RCTRL) || Window::isKeyPressed(SDL_SCANCODE_LALT)) moveOriented(Vec3d(0.0, -0.5, 0.0), Vec3i(0, 1, 0));
 	}
 
 private:

@@ -9,8 +9,11 @@ uniform int RootSize;
 uniform vec3 CameraPosition;
 uniform float RandomSeed;
 uniform sampler2D NoiseTexture;
+uniform sampler2D MaxTexture;
+uniform sampler2D MinTexture;
 uniform float NoiseTextureSize;
 uniform vec2 NoiseOffset;
+uniform float Time;
 
 uniform int PathTracing;
 uniform sampler2D PrevFrame;
@@ -18,11 +21,11 @@ uniform int SampleCount;
 uniform int FrameWidth;
 uniform int FrameHeight;
 uniform int FrameBufferSize;
-
+/*
 layout(std430) buffer TreeData {
 	uint data[];
 };
-
+*/
 in vec2 FragCoords;
 out vec4 FragColor;
 
@@ -33,6 +36,11 @@ const float Pi = 3.14159265f;
 const float Gamma = 2.2f;
 const vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
 const float SunlightAngle = 0.996f;
+const float ProbabilityToSun = 0.0f;
+const uint MaxLevels = 12u; // Octree detail level
+const uint NoiseLevels = 8u; // Noise map detail level <= MaxLevels
+const uint PartialLevels = 7u; // - Min noise level
+const float HeightScale = 16.0f;
 
 // Utilities
 
@@ -62,82 +70,6 @@ float constructFloat(uint m) {
 
 float rand(vec3 v) { return constructFloat(hash(floatBitsToUint(vec4(v, RandomSeed)))); }
 
-// Fractal Noise
-
-float interpolatedNoise3D(in vec3 x) {
-	vec3 p = floor(x), f = fract(x);
-	vec2 uv = (p.xy + NoiseOffset * p.z) + f.xy;
-	vec2 v = texture2D(NoiseTexture, uv / NoiseTextureSize).rb;
-	return mix(v.x, v.y, f.z);
-}
-
-float fractalNoise3D(in vec3 c) {
-	float res = 0.0f;
-	res += interpolatedNoise3D(c * 1.0f) / 1.0f;
-	res += interpolatedNoise3D(c * 2.0f) / 2.0f;
-	res += interpolatedNoise3D(c * 4.0f) / 4.0f;
-	res += interpolatedNoise3D(c * 8.0f) / 8.0f;
-	res += interpolatedNoise3D(c * 16.0f) / 16.0f;
-	res += interpolatedNoise3D(c * 32.0f) / 32.0f;
-//	res += interpolatedNoise3D(c * 64.0f) / 64.0f;
-//	res += interpolatedNoise3D(c * 128.0f) / 128.0f;
-	res = clamp(abs(res - 0.5f) * 2.0f - 0.8f, 0.0f, 1.0f);
-//	res = clamp(abs(res / 2.0f * 2.0f - 1.0f) * 2.0f - 0.2f, 0.0f, 1.0f);
-//	return res < 0.5f ? 0.0f : 1.0f;
-	return res < 0.3f ? clamp((res - 0.3f) * 4.0f + 0.3f, 0.0f, 1.0f) : res;
-}
-
-// Volumetric Clouds
-
-const vec3 CloudScale = vec3(200.0, 120.0, 200.0);
-const float CloudBottom = 100.0, CloudTop = 800.0, CloudTransition = 200.0;
-const int CloudIterations = 64;
-const float CloudStep = 16.0, CloudDistance = 4000.0;
-
-float getCloudOpacity(in vec3 pos) {
-	float factor = min(
-		smoothstep(CloudBottom, CloudBottom + CloudTransition, pos.y),
-		1.0 - smoothstep(CloudTop - CloudTransition, CloudTop, pos.y)
-	);
-	return factor * 0.3 * fractalNoise3D(pos / CloudScale);
-}
-
-vec4 cloud(in vec3 org, in vec3 dir, in float stp, in float maxDist) {
-	vec3 curr = org;
-	vec3 res = vec3(0.0);
-	float transparency = 1.0;
-	
-	dir = normalize(dir);
-	
-	if (curr.y < CloudBottom) {
-		if (dir.y <= 0.0) return vec4(0.0);
-		curr += dir * (CloudBottom - curr.y) / dir.y;
-	} else if (curr.y > CloudTop) {
-		if (dir.y >= 0.0) return vec4(0.0);
-		curr += dir * (CloudTop - curr.y) / dir.y;
-	}
-	
-	for (int i = 0; i < CloudIterations; i++) {
-		curr += dir * stp;
-		
-		if (transparency < 0.01) break;
-		if (length(curr - org) > maxDist) break;
-		
-		if (curr.y >= CloudBottom && curr.y <= CloudTop) {
-			float factor = smoothstep(-maxDist, -maxDist * 0.6, -length(curr - org));
-			float opacity = factor * getCloudOpacity(curr) * 0.5;
-			if (opacity > 0.0) {
-				float occulusion = getCloudOpacity(curr - SunlightDirection * stp * 4.0);
-				float col = clamp(1.2 - occulusion * 0.8, 0.6, 1.0);
-				res += transparency * opacity * vec3(col);
-				transparency *= 1.0 - opacity;
-			}
-		} else break;
-	}
-	
-	return vec4(res, 1.0 - transparency);
-}
-
 // Main Part
 
 struct AABB {
@@ -152,19 +84,27 @@ bool inside(vec3 a, AABB box) {
 
 const uint Root = 1u;
 const int MaxTracedRays = 4;
-//const float DiffuseFactor = 1.0f;
+const float DiffuseFactor = 0.5f;
 #define LAMBERTIAN_DIFFUSE
+//#define REDUNDANCY_CHECK
 
+/*
 #define getPrimitiveData(ind) uint(data[ind])
 bool isLeaf(uint ind) { return (getPrimitiveData(ind) & 1u) != 0u; }
 uint getData(uint ind) { return getPrimitiveData(ind) >> 1u; }
 uint getChildrenPtr(uint ind) { return (getPrimitiveData(ind) >> 1u) + Root; }
+*/
+
+uint getData(uint ind) { return ind - 1u; }
 
 struct Node {
 	uint ptr;
 	AABB box;
 };
 
+bool RedundantSubdivision = false;
+
+/*
 Node getNodeAt(vec3 pos) {
 	uint ptr = Root;
 	AABB box = AABB(vec3(0.0f), vec3(float(RootSize)));
@@ -186,6 +126,109 @@ Node getNodeAt(vec3 pos) {
 		} else box.b.z = mid.z;
 	}
 	return Node(ptr, box);
+}
+*/
+
+// Level 0: least detailed (one pixel)
+
+float linearSample(vec2 pos) {
+	ivec2 p = ivec2(pos * NoiseTextureSize);
+	vec2 f = fract(pos * NoiseTextureSize);
+	int size = int(NoiseTextureSize);
+	float t00 = texelFetch(NoiseTexture, (p + ivec2(0, 0)) % size, 0).r, t10 = texelFetch(NoiseTexture, (p + ivec2(1, 0)) % size, 0).r;
+	float t01 = texelFetch(NoiseTexture, (p + ivec2(0, 1)) % size, 0).r, t11 = texelFetch(NoiseTexture, (p + ivec2(1, 1)) % size, 0).r;
+	return t00 * (1.0f - f.x) * (1.0f - f.y) + t01 * (1.0f - f.x) * f.y + t10 * f.x * (1.0f - f.y) + t11 * f.x * f.y;
+}
+
+//#define F(x, y) (texture(NoiseTexture, pos + vec2(x, y) + vec2(0.5f) / NoiseTextureSize).r)
+#define F(x, y) (linearSample(pos + vec2(x, y)))
+
+float maxNoise2DSubpixel(uint level, uvec2 x) {
+	float size = 1.0f / float(1u << level);
+	vec2 pos = vec2(x) * size;
+	return max(max(F(0, 0), F(size, 0)), max(F(0, size), F(size, size)));
+}
+
+float minNoise2DSubpixel(uint level, uvec2 x) {
+	float size = 1.0f / float(1u << level);
+	vec2 pos = vec2(x) * size;
+	return min(min(F(0, 0), F(size, 0)), min(F(0, size), F(size, size)));
+}
+
+#undef F
+
+float maxNoise2D(uint level, uvec2 x) {
+	if (level > NoiseLevels) return maxNoise2DSubpixel(level, x);
+//	if (x.x >= (1u << NoiseLevels) || x.y >= (1u << NoiseLevels)) discard;
+	return texelFetch(MaxTexture, ivec2(x), int(NoiseLevels - level)).r;
+}
+
+float minNoise2D(uint level, uvec2 x) {
+	if (level > NoiseLevels) return minNoise2DSubpixel(level, x);
+	return texelFetch(MinTexture, ivec2(x), int(NoiseLevels - level)).r;
+}
+
+uint getMaxHeight(uint level, uvec2 pos) {
+	float res = 0.0f, amplitude = pow(2.0f, float(PartialLevels));
+	level += PartialLevels;
+	for (uint i = 0; i <= MaxLevels - NoiseLevels + PartialLevels; i++) {
+		float curr = maxNoise2D(level, pos);
+		res += curr * amplitude;
+		amplitude /= 2.0f;
+		if (level > 0) {
+			level--;
+			pos -= (pos & (1u << level));
+		}
+	}
+	return uint(res * HeightScale);
+}
+
+uint getMinHeight(uint level, uvec2 pos) {
+	float res = 0.0f, amplitude = pow(2.0f, float(PartialLevels));
+	level += PartialLevels;
+	for (uint i = 0; i <= MaxLevels - NoiseLevels + PartialLevels; i++) {
+		float curr = minNoise2D(level, pos);
+		res += curr * amplitude;
+		amplitude /= 2.0f;
+		if (level > 0) {
+			level--;
+			pos -= (pos & (1u << level));
+		}
+	}
+	return uint(res * HeightScale);
+}
+
+int generateNode(uint level, uvec3 pos) {
+	if ((getMaxHeight(level, pos.xz) >> (MaxLevels - level)) < pos.y) return 0;
+//	if (((getMinHeight(level, pos.xz) + 1u) >> (MaxLevels - level)) > pos.y) return 0;
+	return level < MaxLevels ? -1 : 1;
+}
+
+Node getNodeAt(vec3 pos) {
+	AABB box = AABB(vec3(0.0f), vec3(float(RootSize)));
+	if (!inside(pos, box)) return Node(0u, box); // Outside
+	int curr = 0;
+	for (uint level = 0u; level <= MaxLevels; level++) {
+		curr = generateNode(level, uvec3(pos) >> (MaxLevels - level));
+		if (curr >= 0) break;
+#ifdef REDUNDANCY_CHECK
+		bool f = false;
+		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(0u, 0u, 0u)) != 0) f = true;
+		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(0u, 1u, 0u)) != 0) f = true;
+		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(1u, 0u, 0u)) != 0) f = true;
+		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(1u, 1u, 0u)) != 0) f = true;
+		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(0u, 0u, 1u)) != 0) f = true;
+		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(0u, 1u, 1u)) != 0) f = true;
+		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(1u, 0u, 1u)) != 0) f = true;
+		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(1u, 1u, 1u)) != 0) f = true;
+		if (!f) RedundantSubdivision = true;
+#endif
+		vec3 mid = (box.a + box.b) / 2.0f;
+		if (pos.x >= mid.x) box.a.x = mid.x; else box.b.x = mid.x;
+		if (pos.y >= mid.y) box.a.y = mid.y; else box.b.y = mid.y;
+		if (pos.z >= mid.z) box.a.z = mid.z; else box.b.z = mid.z;
+	}
+	return Node(uint(curr + 1), box);
 }
 
 struct Intersection {
@@ -266,7 +309,7 @@ int marchProfiler(vec3 org, vec3 dir) {
 }
 
 vec3 getSkyColor(in vec3 org, in vec3 dir) {
-//	return vec3(1.0f);
+	return vec3(1.0f);
 	float sun = mix(0.0f, 0.7f, clamp(smoothstep(SunlightAngle, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 400.0f;
 	return vec3(sun);
 	sun += mix(0.0f, 0.3f, clamp(smoothstep(0.1f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f));
@@ -276,12 +319,12 @@ vec3 getSkyColor(in vec3 org, in vec3 dir) {
 		smoothstep(0.0f, 1.0f, normalize(dir).y * 2.0f)
 	);
 	vec3 res = mix(sky, vec3(1.0f, 1.0f, 1.0f), sun);
-	vec4 cloudColor = cloud(org, dir, CloudStep, CloudDistance);
-	res = cloudColor.rgb + (1.0 - cloudColor.a) * res;
+//	vec4 cloudColor = cloud(org, dir, CloudStep, CloudDistance);
+//	res = cloudColor.rgb + (1.0 - cloudColor.a) * res;
 	return res;
 }
 
-/*
+///*
 vec3 Palette[7] = vec3[7](
 	vec3(0.0f, 0.0f, 0.0f),
 	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
@@ -291,8 +334,8 @@ vec3 Palette[7] = vec3[7](
 	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
 	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma))
 );
-*/
-///*
+//*/
+/*
 vec3 Palette[7] = vec3[7](
 	vec3(0.0f, 0.0f, 0.0f),
 	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
@@ -302,7 +345,18 @@ vec3 Palette[7] = vec3[7](
 	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
 	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma))
 );
-//*/
+*/
+/*
+vec3 Palette[7] = vec3[7](
+	vec3(0.0f, 0.0f, 0.0f),
+	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma))
+);
+*/
 vec3 Dither[3] = vec3[3](
 	vec3(12.1322f, 23.1313423f, 34.959f),
 	vec3(23.183f, 11.232f, 54.9923f),
@@ -327,9 +381,9 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 		org = p.pos;
 		
 #ifdef LAMBERTIAN_DIFFUSE
-		const float Pr = (dot(Normal[p.face], -SunlightDirection) > 0.1f ? 0.1f : 0.0f);
-		bool towardsSun = (rand(org + Dither[0]) <= Pr);
-		float pdf = 1.0f - Pr;
+		float pr = (dot(Normal[p.face], -SunlightDirection) > 0.1f ? ProbabilityToSun : 0.0f);
+		bool towardsSun = (rand(org + Dither[0]) <= pr);
+		float pdf = 1.0f - pr;
 		
 		float alpha = acos(rand(org + Dither[1]) * 2.0f - 1.0f);
 		if (towardsSun) alpha = acos(1.0f - rand(org + Dither[1]) * (1.0f - SunlightAngle));
@@ -340,7 +394,7 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 			vec3 tangent = normalize(cross(-SunlightDirection, vec3(1.0f, 0.0f, 0.0f)));
 			vec3 bitangent = cross(-SunlightDirection, tangent);
 			dir = mat3(-SunlightDirection, tangent, bitangent) * dir;
-			pdf += Pr / (1.0f - SunlightAngle);
+			pdf += pr / (1.0f - SunlightAngle);
 		}
 		res /= pdf;
 #else
@@ -358,7 +412,7 @@ vec3 rayTrace(vec3 org, vec3 dir) {
 		p.face = BackFace[p.face];
 	}
 	
-	return vec3(0.0f);
+	return res * getSkyColor(org, dir);
 }
 
 vec3 shadowTrace(vec3 org, vec3 dir) {
@@ -405,13 +459,13 @@ void main() {
 	vec3 dir = normalize(divide(fragPosition));
 	vec3 centerDir = normalize(divide(centerFragPosition));
 	
-	vec3 pos = CameraPosition + vec3(float(RootSize) / 2.0f + 23.3f);
+	vec3 pos = CameraPosition * 160.0f + vec3(23.3f, float(RootSize) / 8.0f + 23.3f, 23.3f);
 	apertureDither(pos, dir, float(RootSize) / 6.0f / dot(dir, centerDir), 0.0f);
 	
 	vec3 color = vec3(0.0f);
-	if (PathTracing == 0) color = shadowTrace(pos, dir);
+	if (PathTracing == 0) color = vec3(float(marchProfiler(pos, dir)) / 256.0f); //shadowTrace(pos, dir);
 	else color = rayTrace(pos, dir);
-//	color = vec3(float(marchProfiler(pos, dir)) / 100.0f);
+//	if (RedundantSubdivision) color = vec3(1.0f, 0.0f, 0.0f);
 	
 	if (PathTracing == 0) FragColor = vec4(pow(color, vec3(1.0f / Gamma)), 1.0f);
 	else if (SampleCount == 0) FragColor = vec4(color, 1.0f);

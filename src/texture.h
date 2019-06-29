@@ -62,6 +62,7 @@ class Texture {
 public:
 	Texture() = default;
 	Texture(const TextureImage& image, bool alpha = false, int maxLevels = -1) { load(image, alpha, maxLevels); }
+	explicit Texture(int id): mID(id) {}
 	~Texture() { if (mID > 0) glDeleteTextures(1, &mID); }
 
 	void load(const TextureImage& image, bool alpha = false, int maxLevels = -1);

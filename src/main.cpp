@@ -42,6 +42,37 @@ void disablePathTracing(Window& win) {
 	win.lockCursor();
 }
 
+TextureID loadNoiseMipmaps(const TextureImage& image, bool maximal) {
+	TextureID id = 0;
+	int maxLevels = (int)log2(image.width());
+	glGenTextures(1, &id);
+	glBindTexture(GL_TEXTURE_2D, id);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxLevels);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, maxLevels);
+	glTexEnvf(GL_TEXTURE_FILTER_CONTROL, GL_TEXTURE_LOD_BIAS, 0.0f);
+	int scale = 1;
+	for (int i = 0; i <= maxLevels; i++) {
+		TextureImage curr(image.width() / scale, image.height() / scale, image.bytesPerPixel());
+		for (int i = 0; i < image.height() / scale; i++)
+			for (int j = 0; j < image.width() / scale; j++)
+				for (int k = 0; k < image.bytesPerPixel(); k++) {
+					int sum = maximal? 0 : 255;
+					for (int i1 = 0; i1 < scale; i1++) for (int j1 = 0; j1 < scale; j1++) {
+						int c = image.color(i * scale + i1, j * scale + j1, k);
+						sum = maximal? std::max(sum, c) : std::min(sum, c);
+					}
+					curr.color(i, j, k) = sum;
+				}
+		glTexImage2D(GL_TEXTURE_2D, i, GL_RGBA, curr.width(), curr.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, curr.data());
+		scale *= 2;
+	}
+	return id;
+}
+
 int main(){
 	Config::load();
 
@@ -73,10 +104,10 @@ int main(){
 	
 	// Init voxels
 	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
-	tree.generate();
+//	tree.generate();
 
-	ShaderBuffer ssbo(Renderer::shader(), "TreeData", 0);
-	tree.upload(ssbo);
+//	ShaderBuffer ssbo(Renderer::shader(), "TreeData", 0);
+//	tree.upload(ssbo);
 	
 	// Init noise
 	const int NoiseTextureSize = 256, OffsetX = 37, OffsetY = 17;
@@ -90,6 +121,20 @@ int main(){
 	Texture noiseTexture(noiseImage, true, 0);
 	int noiseTextureIndex = 7;
 	noiseTexture.bind(noiseTextureIndex);
+	
+	// Init noise bounds
+	TextureImage maxImage(NoiseTextureSize, NoiseTextureSize, 4);
+	TextureImage minImage(NoiseTextureSize, NoiseTextureSize, 4);
+	for (int x = 0; x < NoiseTextureSize; x++) for (int y = 0; y < NoiseTextureSize; y++) {
+		int x1 = (x + 1) % NoiseTextureSize, y1 = (y + 1) % NoiseTextureSize;
+		maxImage.color(x, y, 0) = std::max({noiseImage.color(x, y, 0), noiseImage.color(x1, y, 0), noiseImage.color(x, y1, 0), noiseImage.color(x1, y1, 0)});
+		minImage.color(x, y, 0) = std::min({noiseImage.color(x, y, 0), noiseImage.color(x1, y, 0), noiseImage.color(x, y1, 0), noiseImage.color(x1, y1, 0)});
+	}
+	Texture maxTexture(loadNoiseMipmaps(maxImage, true));
+	Texture minTexture(loadNoiseMipmaps(minImage, false));
+	int maxTextureIndex = 6, minTextureIndex = 5;
+	maxTexture.bind(maxTextureIndex);
+	minTexture.bind(minTextureIndex);
 
 	Camera camera;
 	win.lockCursor();
@@ -126,9 +171,12 @@ int main(){
 		Renderer::shader().setUniform3f("CameraPosition", pos.x, pos.y, pos.z);
 		Renderer::shader().setUniform1f("RandomSeed", float(rand() * (RAND_MAX + 1.0f) + rand()) / (RAND_MAX + 1.0f) / (RAND_MAX + 1.0f));
 		Renderer::shader().setUniform1i("NoiseTexture", noiseTextureIndex);
+		Renderer::shader().setUniform1i("MaxTexture", maxTextureIndex);
+		Renderer::shader().setUniform1i("MinTexture", minTextureIndex);
 		Renderer::shader().setUniform1f("NoiseTextureSize", NoiseTextureSize);
 		Renderer::shader().setUniform2f("NoiseOffset", OffsetX, OffsetY);
 		Renderer::shader().setUniform1i("PathTracing", int(pathTracing));
+		Renderer::shader().setUniform1f("Time", float(UpdateScheduler::timeFromEpoch() - startTime));
 		if (pathTracing) {
 			Renderer::shader().setUniform1i("PrevFrame", 0);
 			Renderer::shader().setUniform1i("SampleCount", frameCounter);

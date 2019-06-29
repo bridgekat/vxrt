@@ -37,10 +37,10 @@ const float Gamma = 2.2f;
 const vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
 const float SunlightAngle = 0.996f;
 const float ProbabilityToSun = 0.0f;
-const uint MaxLevels = 12u; // Octree detail level
+const uint MaxLevels = 16u; // Octree detail level
 const uint NoiseLevels = 8u; // Noise map detail level <= MaxLevels
 const uint PartialLevels = 7u; // - Min noise level
-const float HeightScale = 16.0f;
+const float HeightScale = 256.0f;
 
 // Utilities
 
@@ -130,7 +130,7 @@ Node getNodeAt(vec3 pos) {
 */
 
 // Level 0: least detailed (one pixel)
-
+/*
 float linearSample(vec2 pos) {
 	ivec2 p = ivec2(pos * NoiseTextureSize);
 	vec2 f = fract(pos * NoiseTextureSize);
@@ -140,8 +140,8 @@ float linearSample(vec2 pos) {
 	return t00 * (1.0f - f.x) * (1.0f - f.y) + t01 * (1.0f - f.x) * f.y + t10 * f.x * (1.0f - f.y) + t11 * f.x * f.y;
 }
 
-//#define F(x, y) (texture(NoiseTexture, pos + vec2(x, y) + vec2(0.5f) / NoiseTextureSize).r)
-#define F(x, y) (linearSample(pos + vec2(x, y)))
+#define F(x, y) (textureLod(NoiseTexture, pos + vec2(x, y) + vec2(0.5f) / NoiseTextureSize, 0.0f).r)
+//#define F(x, y) (linearSample(pos + vec2(x, y)))
 
 float maxNoise2DSubpixel(uint level, uvec2 x) {
 	float size = 1.0f / float(1u << level);
@@ -149,23 +149,48 @@ float maxNoise2DSubpixel(uint level, uvec2 x) {
 	return max(max(F(0, 0), F(size, 0)), max(F(0, size), F(size, size)));
 }
 
-float minNoise2DSubpixel(uint level, uvec2 x) {
-	float size = 1.0f / float(1u << level);
-	vec2 pos = vec2(x) * size;
-	return min(min(F(0, 0), F(size, 0)), min(F(0, size), F(size, size)));
-}
-
 #undef F
+*/
+/*
+float maxNoise2DSubpixel(uint level, uvec2 x) {
+	float size = NoiseTextureSize / float(1u << level);
+	vec2 pos = vec2(x) * size;
+	ivec2 p = ivec2(pos);
+	int mask = int(NoiseTextureSize) - 1;
+	float t00 = texelFetch(NoiseTexture, (p + ivec2(0, 0)) & mask, 0).r;
+	float t10 = texelFetch(NoiseTexture, (p + ivec2(1, 0)) & mask, 0).r;
+	float t01 = texelFetch(NoiseTexture, (p + ivec2(0, 1)) & mask, 0).r;
+	float t11 = texelFetch(NoiseTexture, (p + ivec2(1, 1)) & mask, 0).r;
+	vec2 f00 = fract(pos) + vec2(0, 0), f10 = fract(pos) + vec2(size, 0), f01 = fract(pos) + vec2(0, size), f11 = fract(pos) + vec2(size, size);
+	float r00 = t00 * (1.0f - f00.x) * (1.0f - f00.y) + t01 * (1.0f - f00.x) * f00.y + t10 * f00.x * (1.0f - f00.y) + t11 * f00.x * f00.y;
+	float r10 = t00 * (1.0f - f10.x) * (1.0f - f10.y) + t01 * (1.0f - f10.x) * f10.y + t10 * f10.x * (1.0f - f10.y) + t11 * f10.x * f10.y;
+	float r01 = t00 * (1.0f - f01.x) * (1.0f - f01.y) + t01 * (1.0f - f01.x) * f01.y + t10 * f01.x * (1.0f - f01.y) + t11 * f01.x * f01.y;
+	float r11 = t00 * (1.0f - f11.x) * (1.0f - f11.y) + t01 * (1.0f - f11.x) * f11.y + t10 * f11.x * (1.0f - f11.y) + t11 * f11.x * f11.y;
+	return max(max(r00, r01), max(r10, r11));
+}
+*/
+float maxNoise2DSubpixel(uint level, uvec2 x) {
+	float size = NoiseTextureSize / float(1u << level);
+	vec2 pos = vec2(x) * size;
+	ivec2 p = ivec2(pos);
+	int mask = int(NoiseTextureSize) - 1;
+	vec4 tex = vec4(
+		texelFetch(NoiseTexture, (p + ivec2(0, 0)) & mask, 0).r,
+		texelFetch(NoiseTexture, (p + ivec2(1, 0)) & mask, 0).r,
+		texelFetch(NoiseTexture, (p + ivec2(0, 1)) & mask, 0).r,
+		texelFetch(NoiseTexture, (p + ivec2(1, 1)) & mask, 0).r
+	);
+	vec2 fpos = fract(pos);
+	vec4 fx = vec4(fpos.x, fpos.x + size, fpos.x, fpos.x + size);
+	vec4 fy = vec4(fpos.y, fpos.y, fpos.y + size, fpos.y + size);
+	vec4 res = mat4((vec4(1.0f) - fx) * (vec4(1.0f) - fy), fx * (vec4(1.0f) - fy), (vec4(1.0f) - fx) * fy, fx * fy) * tex;
+	return max(max(res[0], res[1]), max(res[2], res[3]));
+}
 
 float maxNoise2D(uint level, uvec2 x) {
 	if (level > NoiseLevels) return maxNoise2DSubpixel(level, x);
 //	if (x.x >= (1u << NoiseLevels) || x.y >= (1u << NoiseLevels)) discard;
 	return texelFetch(MaxTexture, ivec2(x), int(NoiseLevels - level)).r;
-}
-
-float minNoise2D(uint level, uvec2 x) {
-	if (level > NoiseLevels) return minNoise2DSubpixel(level, x);
-	return texelFetch(MinTexture, ivec2(x), int(NoiseLevels - level)).r;
 }
 
 uint getMaxHeight(uint level, uvec2 pos) {
@@ -183,25 +208,18 @@ uint getMaxHeight(uint level, uvec2 pos) {
 	return uint(res * HeightScale);
 }
 
-uint getMinHeight(uint level, uvec2 pos) {
-	float res = 0.0f, amplitude = pow(2.0f, float(PartialLevels));
-	level += PartialLevels;
-	for (uint i = 0; i <= MaxLevels - NoiseLevels + PartialLevels; i++) {
-		float curr = minNoise2D(level, pos);
-		res += curr * amplitude;
-		amplitude /= 2.0f;
-		if (level > 0) {
-			level--;
-			pos -= (pos & (1u << level));
-		}
-	}
-	return uint(res * HeightScale);
+vec3 campos, camdir;
+bool lodCheck(uint level, uvec3 pos) {
+	return true;
+	vec3 rpos = (vec3(pos) + vec3(0.5f)) * float(RootSize) / float(1u << level) - campos;
+	float size = sqrt(3.0f) * float(RootSize) / float(1u << level);
+	return tan(35.0f / 180.0f * Pi) * dot(rpos, camdir) * 2.0f / 480.0f <= size; // 480p, vertical fov = 70 degrees
 }
 
 int generateNode(uint level, uvec3 pos) {
 	if ((getMaxHeight(level, pos.xz) >> (MaxLevels - level)) < pos.y) return 0;
 //	if (((getMinHeight(level, pos.xz) + 1u) >> (MaxLevels - level)) > pos.y) return 0;
-	return level < MaxLevels ? -1 : 1;
+	return (level < MaxLevels && lodCheck(level, pos)) ? -1 : 1;
 }
 
 Node getNodeAt(vec3 pos) {
@@ -460,6 +478,7 @@ void main() {
 	vec3 centerDir = normalize(divide(centerFragPosition));
 	
 	vec3 pos = CameraPosition * 160.0f + vec3(23.3f, float(RootSize) / 8.0f + 23.3f, 23.3f);
+	campos = pos, camdir = centerDir;
 	apertureDither(pos, dir, float(RootSize) / 6.0f / dot(dir, centerDir), 0.0f);
 	
 	vec3 color = vec3(0.0f);

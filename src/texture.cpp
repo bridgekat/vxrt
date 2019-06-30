@@ -120,7 +120,7 @@ void Build2DMipmaps(const TextureImage& image, TextureFormat format, int level) 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, level);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 0);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, level);
-	glTexEnvf(GL_TEXTURE_FILTER_CONTROL, GL_TEXTURE_LOD_BIAS, 0.0f);
+//	glTexEnvf(GL_TEXTURE_FILTER_CONTROL, GL_TEXTURE_LOD_BIAS, 0.0f);
 	Assert(image.bytesPerPixel() == 3 || image.bytesPerPixel() == 4);
 	TextureFormat srcFormat = image.bytesPerPixel() == 4 ? TextureFormatRGBA : TextureFormatRGB;
 	int scale = 1;

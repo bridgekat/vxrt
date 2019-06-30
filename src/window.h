@@ -16,7 +16,7 @@ public:
 	Window(const Window&) = delete;
 	Window& operator=(const Window&) = delete;
 
-	void makeCurrentDraw() const { SDL_GL_MakeCurrent(mWindow, mContext); }
+	void makeCurrent() const { SDL_GL_MakeCurrent(mWindow, mContext); }
 	void swapBuffers() const { SDL_GL_SwapWindow(mWindow); }
 
 	static const Uint8* getKeyBoardState() { return SDL_GetKeyboardState(nullptr); }

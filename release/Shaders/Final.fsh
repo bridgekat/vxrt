@@ -1,11 +1,10 @@
-#version 430 core
-#extension GL_ARB_shader_storage_buffer_object: enable
+#version 330 core
 
 uniform mat4 ProjectionMatrix;
 uniform mat4 ModelViewMatrix;
 uniform mat4 ProjectionInverse;
 uniform mat4 ModelViewInverse;
-uniform int RootSize;
+/*uniform */int RootSize;
 uniform vec3 CameraPosition;
 uniform float RandomSeed;
 uniform sampler2D NoiseTexture;
@@ -37,10 +36,10 @@ const float Gamma = 2.2f;
 const vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
 const float SunlightAngle = 0.996f;
 const float ProbabilityToSun = 0.0f;
-const uint MaxLevels = 16u; // Octree detail level
-const uint NoiseLevels = 8u; // Noise map detail level <= MaxLevels
-const uint PartialLevels = 7u; // - Min noise level
-const float HeightScale = 256.0f;
+const uint MaxLevels = 12u; // Octree detail level
+const uint NoiseLevels = 8u; // Noise map detail level <= MaxLevels, matches the noise map resolution in main program
+const uint PartialLevels = 7u; // - Min noise level (using part of the noise map)
+const float HeightScale = float(1u << MaxLevels) / 256.0f;
 
 // Utilities
 
@@ -101,8 +100,6 @@ struct Node {
 	uint ptr;
 	AABB box;
 };
-
-bool RedundantSubdivision = false;
 
 /*
 Node getNodeAt(vec3 pos) {
@@ -196,11 +193,11 @@ float maxNoise2D(uint level, uvec2 x) {
 uint getMaxHeight(uint level, uvec2 pos) {
 	float res = 0.0f, amplitude = pow(2.0f, float(PartialLevels));
 	level += PartialLevels;
-	for (uint i = 0; i <= MaxLevels - NoiseLevels + PartialLevels; i++) {
+	for (uint i = 0u; i <= MaxLevels - NoiseLevels + PartialLevels; i++) {
 		float curr = maxNoise2D(level, pos);
 		res += curr * amplitude;
 		amplitude /= 2.0f;
-		if (level > 0) {
+		if (level > 0u) {
 			level--;
 			pos -= (pos & (1u << level));
 		}
@@ -208,12 +205,13 @@ uint getMaxHeight(uint level, uvec2 pos) {
 	return uint(res * HeightScale);
 }
 
-vec3 campos, camdir;
+// TODO: use an "averaging" approximation in LOD
+vec3 lodCenterPos, lodViewDir;
 bool lodCheck(uint level, uvec3 pos) {
 	return true;
-	vec3 rpos = (vec3(pos) + vec3(0.5f)) * float(RootSize) / float(1u << level) - campos;
+	vec3 rpos = (vec3(pos) + vec3(0.5f)) * float(RootSize) / float(1u << level) - lodCenterPos;
 	float size = sqrt(3.0f) * float(RootSize) / float(1u << level);
-	return tan(35.0f / 180.0f * Pi) * dot(rpos, camdir) * 2.0f / 480.0f <= size; // 480p, vertical fov = 70 degrees
+	return tan(35.0f / 180.0f * Pi) * dot(rpos, lodViewDir) * 2.0f / 480.0f <= size; // 480p, vertical fov = 70 degrees
 }
 
 int generateNode(uint level, uvec3 pos) {
@@ -222,6 +220,7 @@ int generateNode(uint level, uvec3 pos) {
 	return (level < MaxLevels && lodCheck(level, pos)) ? -1 : 1;
 }
 
+int redundantSubdivisionCount = 0;
 Node getNodeAt(vec3 pos) {
 	AABB box = AABB(vec3(0.0f), vec3(float(RootSize)));
 	if (!inside(pos, box)) return Node(0u, box); // Outside
@@ -239,7 +238,7 @@ Node getNodeAt(vec3 pos) {
 		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(0u, 1u, 1u)) != 0) f = true;
 		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(1u, 0u, 1u)) != 0) f = true;
 		if (generateNode(level + 1u, (uvec3(pos) >> (MaxLevels - level)) * 2u + uvec3(1u, 1u, 1u)) != 0) f = true;
-		if (!f) RedundantSubdivision = true;
+		if (!f) redundantSubdivisionCount++;
 #endif
 		vec3 mid = (box.a + box.b) / 2.0f;
 		if (pos.x >= mid.x) box.a.x = mid.x; else box.b.x = mid.x;
@@ -468,6 +467,8 @@ void apertureDither(inout vec3 pos, inout vec3 dir, float focalDist, float apert
 }
 
 void main() {
+	RootSize = 1 << int(MaxLevels);
+	
 	float randx = rand(vec3(FragCoords, 1.0f)) * 2.0f - 1.0f, randy = rand(vec3(FragCoords, -1.0f)) * 2.0f - 1.0f;
 	vec2 ditheredCoords = FragCoords + vec2(randx / float(FrameWidth), randy / float(FrameHeight)); // Anti-aliasing
 	
@@ -478,17 +479,21 @@ void main() {
 	vec3 centerDir = normalize(divide(centerFragPosition));
 	
 	vec3 pos = CameraPosition * 160.0f + vec3(23.3f, float(RootSize) / 8.0f + 23.3f, 23.3f);
-	campos = pos, camdir = centerDir;
 	apertureDither(pos, dir, float(RootSize) / 6.0f / dot(dir, centerDir), 0.0f);
+	
+	lodCenterPos = pos, lodViewDir = centerDir;
 	
 	vec3 color = vec3(0.0f);
 	if (PathTracing == 0) color = vec3(float(marchProfiler(pos, dir)) / 256.0f); //shadowTrace(pos, dir);
 	else color = rayTrace(pos, dir);
-//	if (RedundantSubdivision) color = vec3(1.0f, 0.0f, 0.0f);
+	
+#ifdef REDUNDANCY_CHECK
+	if (redundantSubdivisionCount > 0) color = vec3(1.0f * float(redundantSubdivisionCount) / float(MaxLevels), color.gb);
+#endif
 	
 	if (PathTracing == 0) FragColor = vec4(pow(color, vec3(1.0f / Gamma)), 1.0f);
 	else if (SampleCount == 0) FragColor = vec4(color, 1.0f);
-    else {
+	else {
 		vec2 texCoord = FragCoords / 2.0f + vec2(0.5f);
 		texCoord *= vec2(float(FrameWidth), float(FrameHeight)) / vec2(float(FrameBufferSize));
 		vec3 texel = texture(PrevFrame, texCoord).rgb;

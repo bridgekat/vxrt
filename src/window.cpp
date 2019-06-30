@@ -24,37 +24,37 @@ void GLCALLBACK glDebugCallback(GLenum /*source*/, GLenum /*type*/, GLuint /*id*
 Window::Window(const std::string& title, int width, int height):
 	mTitle(title), mWidth(width), mHeight(height) {
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER);
+	
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
-	static bool openglDebug = Config::getInt("OpenGL.Debugging", 0) != 0;
-	static bool coreProfile = Config::getInt("OpenGL.CoreProfile", 1) != 0;
-	static bool gles = Config::getInt("OpenGL.ES", 0) != 0;
-	if (gles) coreProfile = true;
-
-	if (openglDebug) SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
-	if (coreProfile) {
-		if (gles) SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-		else SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-		LogInfo("OpenGL profile: Core/ES");
-	} else {
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
-		LogInfo("OpenGL profile: Compatibility");
+	static bool forceVersion = Config::getInt("OpenGL.ForceMinimumVersion", 0) != 0;
+	if (forceVersion) {
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 	}
 
-	mWindow = SDL_CreateWindow(mTitle.c_str(), 100, 100, mWidth, mHeight, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	LogInfo("OpenGL profile: Core/ES");
 
+	static bool openglDebug = Config::getInt("OpenGL.Debugging", 0) != 0;
+	if (openglDebug) SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+
+	mWindow = SDL_CreateWindow(mTitle.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, mWidth, mHeight, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
 	if (mWindow == nullptr) {
 		LogFatal("Failed to create SDL window!");
 		Assert(false);
 	}
 
 	mContext = SDL_GL_CreateContext(mWindow);
-	makeCurrentDraw();
+	if (mContext == nullptr) {
+		LogFatal("Failed to create OpenGL context!");
+		Assert(false);
+	}
 
-	OpenGL::init(coreProfile);
-
+	makeCurrent();
+	OpenGL::init(true);
 	SDL_GL_SetSwapInterval(0);
 
 	if (openglDebug) {

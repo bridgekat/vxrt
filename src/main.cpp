@@ -53,7 +53,7 @@ TextureID loadNoiseMipmaps(const TextureImage& image, bool maximal) {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxLevels);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 0);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, maxLevels);
-	glTexEnvf(GL_TEXTURE_FILTER_CONTROL, GL_TEXTURE_LOD_BIAS, 0.0f);
+//	glTexEnvf(GL_TEXTURE_FILTER_CONTROL, GL_TEXTURE_LOD_BIAS, 0.0f);
 	int scale = 1;
 	for (int i = 0; i <= maxLevels; i++) {
 		TextureImage curr(image.width() / scale, image.height() / scale, image.bytesPerPixel());
@@ -77,16 +77,12 @@ int main(){
 	Config::load();
 
 	Window& win = Window::getDefaultWindow("vxrt", 852, 480);
-
-	if (!OpenGL::coreProfile()) {
-		LogError("Program must run in OpenGL core profile!");
-		return 0;
-	}
-
-	if (!OpenGL::arbShaderStorageBufferObject()) {
-		LogError("ARB_shader_storage_buffer_object is not supported!");
-		return 0;
-	}
+	
+	std::stringstream ss;
+	ss.str(""); ss << "Renderer: " << glGetString(GL_RENDERER) << " [" << glGetString(GL_VENDOR) << "]";
+	LogInfo(ss.str());
+	ss.str(""); ss << "OpenGL version: " << glGetString(GL_VERSION);
+	LogInfo(ss.str());
 
 	Renderer::init();
 	presenter.loadShadersFromFile(std::string(ShaderPath) + "Present.vsh", std::string(ShaderPath) + "Present.fsh");
@@ -103,7 +99,7 @@ int main(){
 	}
 	
 	// Init voxels
-	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
+//	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
 //	tree.generate();
 
 //	ShaderBuffer ssbo(Renderer::shader(), "TreeData", 0);
@@ -135,7 +131,7 @@ int main(){
 	int maxTextureIndex = 6, minTextureIndex = 5;
 	maxTexture.bind(maxTextureIndex);
 	minTexture.bind(minTextureIndex);
-
+	
 	Camera camera;
 	win.lockCursor();
 
@@ -166,7 +162,7 @@ int main(){
 
 		// Init shaders
 		noiseTexture.bind(noiseTextureIndex);
-		Renderer::shader().setUniform1i("RootSize", tree.size());
+//		Renderer::shader().setUniform1i("RootSize", tree.size());
 		Vec3f pos = camera.position();
 		Renderer::shader().setUniform3f("CameraPosition", pos.x, pos.y, pos.z);
 		Renderer::shader().setUniform1f("RandomSeed", float(rand() * (RAND_MAX + 1.0f) + rand()) / (RAND_MAX + 1.0f) / (RAND_MAX + 1.0f));

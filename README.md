@@ -1,11 +1,10 @@
-# Project VXRT
+# Voxel Raycasting Test
 
-A (slow) voxel ray-tracing renderer based on sparse voxel octrees!  
+A (slow) voxel ray-casting / path-tracing renderer based on sparse voxel octrees!  
 Licensed under WTFPLv2.  
 
 ### Screenshots
 
-![Glossy Reflection](https://github.com/qiaozhanrong/vxrt/blob/experimental/release/Screenshots/glossy-4-small.png?raw=true)  
-![Glossy Reflection](https://github.com/qiaozhanrong/vxrt/blob/experimental/release/Screenshots/glossy-8-small.png?raw=true)  
-![New Terrain Generator](https://github.com/qiaozhanrong/vxrt/blob/experimental/release/Screenshots/20181221-4k-102spp-small.png?raw=true)  
-
+![New Terrain Generator](https://github.com/qiaozhanrong/assets/blob/master/vxrt/4096x2160-1159spp-825.222s.png?raw=true)
+![Importance Sampling](https://github.com/qiaozhanrong/assets/blob/master/vxrt/4096x2160-16932spp-7121.89s.png?raw=true)
+![Large-scale Terrain](https://github.com/qiaozhanrong/assets/blob/master/vxrt/4096x2160-252spp-2114.95s.png?raw=true)

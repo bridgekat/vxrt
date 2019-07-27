@@ -57,16 +57,31 @@ void Shader::loadFromFile(GLenum type, const std::string& filename) {
 	checkCompilation(mHandle, "Shader compilation error: \"" + filename + "\"");
 }
 
+ShaderProgram::~ShaderProgram() {
+	GLint count = 0;
+	glGetProgramiv(mHandle, GL_ATTACHED_SHADERS, &count);
+	std::unique_ptr<GLuint[]> names(new GLuint[count]);
+	glGetAttachedShaders(mHandle, count, nullptr, names.get());
+	for (int i = 0; i < count; i++) {
+		glDetachShader(mHandle, names[i]);
+		std::stringstream ss;
+		ss << "Detached shader " << names[i];
+		LogInfo(ss.str());
+	}
+	glDeleteProgram(mHandle);
+}
+
 void ShaderProgram::loadShadersFromFile(const std::string& vertex, const std::string& fragment) {
-	mVertex.loadFromFile(GL_VERTEX_SHADER, vertex);
-	mFragment.loadFromFile(GL_FRAGMENT_SHADER, fragment);
-	if (mVertex.type() != GL_VERTEX_SHADER || mFragment.type() != GL_FRAGMENT_SHADER) {
+	Shader vsh, fsh;
+	vsh.loadFromFile(GL_VERTEX_SHADER, vertex);
+	fsh.loadFromFile(GL_FRAGMENT_SHADER, fragment);
+	if (vsh.type() != GL_VERTEX_SHADER || fsh.type() != GL_FRAGMENT_SHADER) {
 		LogError("Shader type mismatch!");
 		std::terminate();
 	}
 	mHandle = glCreateProgram();
-	glAttachShader(mHandle, mVertex.handle());
-	glAttachShader(mHandle, mFragment.handle());
+	glAttachShader(mHandle, vsh.handle());
+	glAttachShader(mHandle, fsh.handle());
 	glLinkProgram(mHandle);
 	checkLinking(mHandle, "Shader program linking error:");
 }

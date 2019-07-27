@@ -1,4 +1,6 @@
-#version 330 core
+#version 430 core
+
+layout(local_size_x = 8u, local_size_y = 8u, local_size_z = 1u) in;
 
 uniform mat4 ProjectionMatrix;
 uniform mat4 ModelViewMatrix;
@@ -25,8 +27,11 @@ layout(std430) buffer TreeData {
 	uint data[];
 };
 */
-in vec2 FragCoords;
-out vec4 FragColor;
+//in vec2 FragCoords;
+//out vec4 FragColor;
+vec2 FragCoords;
+vec4 FragColor;
+uniform restrict writeonly layout(rgba32f) image2D FrameBuffer;
 
 // Constants
 
@@ -467,14 +472,11 @@ void apertureDither(inout vec3 pos, inout vec3 dir, float focalDist, float apert
 }
 
 void main() {
-	RootSize = 1 << int(MaxLevels);
+	ivec2 outputPixelCoords = ivec3(gl_GlobalInvocationID).xy;
+	if (outputPixelCoords.x >= FrameWidth || outputPixelCoords.y >= FrameHeight) return;
+	FragCoords = vec2(outputPixelCoords) / vec2(float(FrameWidth), float(FrameHeight)) * 2.0f - vec2(1.0f);
 	
-	vec2 pixelCoords = (FragCoords + vec2(1.0f)) / 2.0f * vec2(float(FrameWidth), float(FrameHeight));
-	float noiseMapSize = pow(2.0f, float(NoiseLevels));
-	if (pixelCoords.x < noiseMapSize && pixelCoords.y < noiseMapSize) {
-		FragColor = vec4(vec3(texture(NoiseTexture, pixelCoords / noiseMapSize).r), 1.0f);
-		return;
-	}
+	RootSize = 1 << int(MaxLevels);
 	
 	float randx = rand(vec3(FragCoords, 1.0f)) * 2.0f - 1.0f, randy = rand(vec3(FragCoords, -1.0f)) * 2.0f - 1.0f;
 	vec2 ditheredCoords = FragCoords + vec2(randx / float(FrameWidth), randy / float(FrameHeight)); // Anti-aliasing
@@ -506,4 +508,6 @@ void main() {
 		vec3 texel = texture(PrevFrame, texCoord).rgb;
 		FragColor = vec4((color + texel * float(SampleCount)) / float(SampleCount + 1), 1.0f);
 	}
+	
+	imageStore(FrameBuffer, outputPixelCoords, FragColor);
 }

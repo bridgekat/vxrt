@@ -19,13 +19,13 @@ private:
 
 class ShaderProgram {
 public:
-	~ShaderProgram() {
-		glDetachShader(mHandle, mVertex.handle());
-		glDetachShader(mHandle, mFragment.handle());
-		glDeleteProgram(mHandle);
-	}
+	~ShaderProgram();
 	
 	GLuint handle() const noexcept { return mHandle; }
+
+	void create() { mHandle = glCreateProgram(); }
+	void attach(const Shader& shader) { glAttachShader(mHandle, shader.handle()); }
+	void link() { glLinkProgram(mHandle); }
 
 	void loadShadersFromFile(const std::string& vertex, const std::string& fragment);
 
@@ -43,7 +43,6 @@ public:
 	void setUniformMatrix4fv(const std::string& uniform, float* v0);
 
 private:
-	Shader mVertex, mFragment;
-	GLuint mHandle;
+	GLuint mHandle = 0;
 };
 

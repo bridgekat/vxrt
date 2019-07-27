@@ -44,6 +44,8 @@ public:
 		glActiveTexture(GL_TEXTURE0);
 	}
 
+	const GLuint* colorTextures() const { return mColorTextures; }
+
 private:
 	int mSize, mColorAttachCount;
 	bool mCreated, mDepthAttach;

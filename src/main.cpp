@@ -15,7 +15,7 @@ const float Gamma = 2.2f;
 
 FrameBuffer fbo[2];
 ShaderProgram presenter;
-int fbWidthDefault = 0, fbHeightDefault = 0;
+int patchSize, fbWidthDefault = 0, fbHeightDefault = 0;
 int fbWidth, fbHeight, rasterChunks;
 bool preInitFBO;
 
@@ -86,6 +86,7 @@ int main(){
 
 	Renderer::init();
 	presenter.loadShadersFromFile(std::string(ShaderPath) + "Present.vsh", std::string(ShaderPath) + "Present.fsh");
+	patchSize = Config::getInt("PathTracing.PatchSize", 8);
 	fbWidthDefault = Config::getInt("PathTracing.DefaultRenderWidth", 0);
 	fbHeightDefault = Config::getInt("PathTracing.DefaultRenderHeight", 0);
 	rasterChunks = Config::getInt("PathTracing.RasterChunks", 1);
@@ -98,11 +99,18 @@ int main(){
 		}
 	}
 	
+	Shader mainShader;
+	mainShader.loadFromFile(GL_COMPUTE_SHADER, std::string(ShaderPath) + "Main.csh");
+	ShaderProgram mainProgram;
+	mainProgram.create();
+	mainProgram.attach(mainShader);
+	mainProgram.link();
+
 	// Init voxels
 //	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
 //	tree.generate();
 
-//	ShaderBuffer ssbo(Renderer::shader(), "TreeData", 0);
+//	ShaderBuffer ssbo(mainProgram, "TreeData", 0);
 //	tree.upload(ssbo);
 	
 	// Init noise
@@ -149,83 +157,67 @@ int main(){
 		// Init rendering
 		int curr = frameCounter & 1;
 		if (!pathTracing) {
-			Renderer::setRenderArea(0, 0, win.getWidth(), win.getHeight());
-		} else {
-			fbo[curr].bind();
-			fbo[curr ^ 1].bindColorTextures(0);
-			Renderer::setRenderArea(0, 0, fbWidth, fbHeight);
+			fbWidth = win.getWidth(), fbHeight = win.getHeight();
+			fbo[curr].create(fbWidth, fbHeight, 1, false);
 		}
+		Renderer::setRenderArea(0, 0, fbWidth, fbHeight);
+//		fbo[curr].bind();
+		fbo[curr ^ 1].bindColorTextures(0);
 		Renderer::clear();
-		Renderer::beginFinalPass();
-		Renderer::setProjection(camera.getProjectionMatrix());
-		Renderer::setModelview(camera.getModelViewMatrix());
+
+		mainProgram.bind();
+//		Renderer::setProjection(camera.getProjectionMatrix());
+//		Renderer::setModelview(camera.getModelViewMatrix());
+		mainProgram.setUniformMatrix4fv("ProjectionMatrix", camera.getProjectionMatrix().getTranspose().data);
+		mainProgram.setUniformMatrix4fv("ModelViewMatrix", camera.getModelViewMatrix().getTranspose().data);
+		mainProgram.setUniformMatrix4fv("ProjectionInverse", camera.getProjectionMatrix().getInverse().getTranspose().data);
+		mainProgram.setUniformMatrix4fv("ModelViewInverse", camera.getModelViewMatrix().getInverse().getTranspose().data);
 
 		// Init shaders
 		noiseTexture.bind(noiseTextureIndex);
-//		Renderer::shader().setUniform1i("RootSize", tree.size());
+//		mainProgram.setUniform1i("RootSize", tree.size());
 		Vec3f pos = camera.position();
-		Renderer::shader().setUniform3f("CameraPosition", pos.x, pos.y, pos.z);
-		Renderer::shader().setUniform1f("RandomSeed", float(rand() * (RAND_MAX + 1.0f) + rand()) / (RAND_MAX + 1.0f) / (RAND_MAX + 1.0f));
-		Renderer::shader().setUniform1i("NoiseTexture", noiseTextureIndex);
-		Renderer::shader().setUniform1i("MaxTexture", maxTextureIndex);
-		Renderer::shader().setUniform1i("MinTexture", minTextureIndex);
-		Renderer::shader().setUniform1f("NoiseTextureSize", NoiseTextureSize);
-		Renderer::shader().setUniform2f("NoiseOffset", OffsetX, OffsetY);
-		Renderer::shader().setUniform1i("PathTracing", int(pathTracing));
-		Renderer::shader().setUniform1f("Time", float(UpdateScheduler::timeFromEpoch() - startTime));
-		if (pathTracing) {
-			Renderer::shader().setUniform1i("PrevFrame", 0);
-			Renderer::shader().setUniform1i("SampleCount", frameCounter);
-			Renderer::shader().setUniform1i("FrameWidth", fbWidth);
-			Renderer::shader().setUniform1i("FrameHeight", fbHeight);
-			Renderer::shader().setUniform1i("FrameBufferSize", fbo[curr].size());
-		} else {
-			Renderer::shader().setUniform1i("FrameWidth", win.getWidth());
-			Renderer::shader().setUniform1i("FrameHeight", win.getHeight());
-		}
+		mainProgram.setUniform3f("CameraPosition", pos.x, pos.y, pos.z);
+		mainProgram.setUniform1f("RandomSeed", float(rand() * (RAND_MAX + 1.0f) + rand()) / (RAND_MAX + 1.0f) / (RAND_MAX + 1.0f));
+		mainProgram.setUniform1i("NoiseTexture", noiseTextureIndex);
+		mainProgram.setUniform1i("MaxTexture", maxTextureIndex);
+		mainProgram.setUniform1i("MinTexture", minTextureIndex);
+		mainProgram.setUniform1f("NoiseTextureSize", NoiseTextureSize);
+		mainProgram.setUniform2f("NoiseOffset", OffsetX, OffsetY);
+		mainProgram.setUniform1i("PathTracing", int(pathTracing));
+		mainProgram.setUniform1f("Time", float(UpdateScheduler::timeFromEpoch() - startTime));
+		mainProgram.setUniform1i("PrevFrame", 0);
+		mainProgram.setUniform1i("SampleCount", frameCounter);
+		mainProgram.setUniform1i("FrameWidth", fbWidth);
+		mainProgram.setUniform1i("FrameHeight", fbHeight);
+		mainProgram.setUniform1i("FrameBufferSize", fbo[curr].size());
 
 		// Render scene (sample once for each pixel)
-		for (int x = 0; x < rasterChunks; x++) { // Prevent from crashing (timeout)...
-			for (int y = 0; y < rasterChunks; y++) {
-				float xmin = 2.0f / rasterChunks * x - 1.0f;
-				float xmax = xmin + 2.0f / rasterChunks;
-				float ymin = 2.0f / rasterChunks * y - 1.0f;
-				float ymax = ymin + 2.0f / rasterChunks;
-				VertexArray va(6, VertexFormat(0, 0, 0, 2));
-				va.addVertex({xmin, ymax});
-				va.addVertex({xmin, ymin});
-				va.addVertex({xmax, ymax});
-				va.addVertex({xmax, ymax});
-				va.addVertex({xmin, ymin});
-				va.addVertex({xmax, ymin});
-				VertexBuffer(va, false).render();
-				if (rasterChunks != 1) Renderer::waitForComplete();
-			}
-		}
+		int outimageIndex = 0;
+		mainProgram.setUniform1i("FrameBuffer", outimageIndex);
+		glBindImageTexture(outimageIndex, fbo[curr].colorTextures()[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+		glDispatchCompute((fbWidth - 1) / patchSize + 1, (fbHeight - 1) / patchSize + 1, 1);
+		glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT); // GL_SHADER_IMAGE_ACCESS_BARRIER_BIT
 
-		Renderer::endFinalPass();
-
-		if (pathTracing) {
-			// Present to screen
-			fbo[curr].unbind();
-			fbo[curr].bindColorTextures(0);
-			presenter.bind();
-			Renderer::clear();
-			Renderer::setRenderArea(0, 0, win.getWidth(), win.getHeight());
-			presenter.setUniform1i("Texture", 0);
-			presenter.setUniform1i("FrameWidth", fbWidth);
-			presenter.setUniform1i("FrameHeight", fbHeight);
-			presenter.setUniform1i("FrameBufferSize", fbo[curr].size());
-			VertexArray va(6, VertexFormat(0, 0, 0, 2));
-			va.addVertex({-1.0f, 1.0f});
-			va.addVertex({-1.0f,-1.0f});
-			va.addVertex({ 1.0f, 1.0f});
-			va.addVertex({ 1.0f, 1.0f});
-			va.addVertex({-1.0f,-1.0f});
-			va.addVertex({ 1.0f,-1.0f});
-			VertexBuffer(va, false).render();
-			presenter.unbind();
-		}
+		// Present to screen
+//		fbo[curr].unbind();
+		fbo[curr].bindColorTextures(0);
+		presenter.bind();
+		Renderer::clear();
+		Renderer::setRenderArea(0, 0, win.getWidth(), win.getHeight());
+		presenter.setUniform1i("Texture", 0);
+		presenter.setUniform1i("FrameWidth", fbWidth);
+		presenter.setUniform1i("FrameHeight", fbHeight);
+		presenter.setUniform1i("FrameBufferSize", fbo[curr].size());
+		VertexArray va(6, VertexFormat(0, 0, 0, 2));
+		va.addVertex({-1.0f, 1.0f});
+		va.addVertex({-1.0f,-1.0f});
+		va.addVertex({ 1.0f, 1.0f});
+		va.addVertex({ 1.0f, 1.0f});
+		va.addVertex({-1.0f,-1.0f});
+		va.addVertex({ 1.0f,-1.0f});
+		VertexBuffer(va, false).render();
+		presenter.unbind();
 
 		// Update FPS
 		frameCounter++;

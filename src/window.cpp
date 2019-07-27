@@ -31,7 +31,7 @@ Window::Window(const std::string& title, int width, int height):
 
 	static bool forceVersion = Config::getInt("OpenGL.ForceMinimumVersion", 0) != 0;
 	if (forceVersion) {
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 	}
 

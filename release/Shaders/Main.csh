@@ -22,13 +22,11 @@ uniform int SampleCount;
 uniform int FrameWidth;
 uniform int FrameHeight;
 uniform int FrameBufferSize;
-/*
+
 layout(std430) buffer TreeData {
 	uint data[];
 };
-*/
-//in vec2 FragCoords;
-//out vec4 FragColor;
+
 vec2 FragCoords;
 vec4 FragColor;
 uniform restrict writeonly layout(rgba32f) image2D FrameBuffer;
@@ -500,12 +498,10 @@ void main() {
 	if (redundantSubdivisionCount > 0) color = vec3(1.0f * float(redundantSubdivisionCount) / float(MaxLevels), color.gb);
 #endif
 	
-	if (PathTracing == 0) FragColor = vec4(pow(color, vec3(1.0f / Gamma)), 1.0f);
+	if (PathTracing == 0) FragColor = vec4(color, 1.0f);
 	else if (SampleCount == 0) FragColor = vec4(color, 1.0f);
 	else {
-		vec2 texCoord = FragCoords / 2.0f + vec2(0.5f);
-		texCoord *= vec2(float(FrameWidth), float(FrameHeight)) / vec2(float(FrameBufferSize));
-		vec3 texel = texture(PrevFrame, texCoord).rgb;
+		vec3 texel = texelFetch(PrevFrame, outputPixelCoords, 0).rgb;
 		FragColor = vec4((color + texel * float(SampleCount)) / float(SampleCount + 1), 1.0f);
 	}
 	

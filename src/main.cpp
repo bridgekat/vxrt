@@ -197,7 +197,7 @@ int main(){
 		mainProgram.setUniform1i("FrameBuffer", outimageIndex);
 		glBindImageTexture(outimageIndex, fbo[curr].colorTextures()[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 		glDispatchCompute((fbWidth - 1) / patchSize + 1, (fbHeight - 1) / patchSize + 1, 1);
-		glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT); // GL_SHADER_IMAGE_ACCESS_BARRIER_BIT
+		glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
 
 		// Present to screen
 //		fbo[curr].unbind();

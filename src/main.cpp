@@ -112,6 +112,20 @@ int main(){
 
 //	ShaderBuffer ssbo(mainProgram, "TreeData", 0);
 //	tree.upload(ssbo);
+
+	ShaderBuffer ssbo(mainProgram, "TreeData", 1);
+	size_t Size = 536870911;
+	unsigned int* data = new unsigned int[Size];
+	memset(data, 0, sizeof(unsigned int) * Size);
+	data[0] = 2;
+	ssbo.update(sizeof(unsigned int) * Size, data);
+	delete[] data;
+
+	ShaderBuffer outBuffer(mainProgram, "OutputData", 2);
+	data = new unsigned int[1];
+	data[0] = 0;
+	outBuffer.update(sizeof(unsigned int) * 1, data);
+	delete[] data;
 	
 	// Init noise
 	const int NoiseTextureSize = 256, OffsetX = 37, OffsetY = 17;
@@ -191,13 +205,14 @@ int main(){
 		mainProgram.setUniform1i("FrameWidth", fbWidth);
 		mainProgram.setUniform1i("FrameHeight", fbHeight);
 		mainProgram.setUniform1i("FrameBufferSize", fbo[curr].size());
+		mainProgram.setUniform1i("MaxNodes", Size);
 
 		// Render scene (sample once for each pixel)
 		int outimageIndex = 0;
 		mainProgram.setUniform1i("FrameBuffer", outimageIndex);
 		glBindImageTexture(outimageIndex, fbo[curr].colorTextures()[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 		glDispatchCompute((fbWidth - 1) / patchSize + 1, (fbHeight - 1) / patchSize + 1, 1);
-		glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+		glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
 
 		// Present to screen
 //		fbo[curr].unbind();
@@ -232,6 +247,9 @@ int main(){
 			}
 			Window::getDefaultWindow().setTitle(ss.str());
 			frameCounterScheduler.increase();
+			unsigned int count = 0;
+			outBuffer.download(sizeof(count), &count);
+			ss.str(""); ss << "Allocated nodes: " << count; LogVerbose(ss.str());
 		}
 
 		win.pollEvents();

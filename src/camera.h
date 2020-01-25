@@ -43,12 +43,13 @@ public:
 	void update(const Window& win) {
 		MouseState mouse = win.getMouseMotion();
 		mRotation += Vec3f(-mouse.y * 0.3f, -mouse.x * 0.3f, 0.0f);
-		if (Window::isKeyPressed(SDL_SCANCODE_W)) moveOriented(Vec3d(0.0, 0.0, -0.5), Vec3i(0, 1, 0));
-		if (Window::isKeyPressed(SDL_SCANCODE_S)) moveOriented(Vec3d(0.0, 0.0, 0.5), Vec3i(0, 1, 0));
-		if (Window::isKeyPressed(SDL_SCANCODE_A)) moveOriented(Vec3d(-0.5, 0.0, 0.0), Vec3i(0, 1, 0));
-		if (Window::isKeyPressed(SDL_SCANCODE_D)) moveOriented(Vec3d(0.5, 0.0, 0.0), Vec3i(0, 1, 0));
-		if (Window::isKeyPressed(SDL_SCANCODE_SPACE)) moveOriented(Vec3d(0.0, 0.5, 0.0), Vec3i(0, 1, 0));
-		if (Window::isKeyPressed(SDL_SCANCODE_LCTRL) || Window::isKeyPressed(SDL_SCANCODE_RCTRL) || Window::isKeyPressed(SDL_SCANCODE_LALT)) moveOriented(Vec3d(0.0, -0.5, 0.0), Vec3i(0, 1, 0));
+		double speed = Window::isKeyPressed(SDL_SCANCODE_TAB) ? 100.0 : 1.0;
+		if (Window::isKeyPressed(SDL_SCANCODE_W)) moveOriented(Vec3d(0.0, 0.0, -0.5) * speed, Vec3i(0, 1, 0));
+		if (Window::isKeyPressed(SDL_SCANCODE_S)) moveOriented(Vec3d(0.0, 0.0, 0.5) * speed, Vec3i(0, 1, 0));
+		if (Window::isKeyPressed(SDL_SCANCODE_A)) moveOriented(Vec3d(-0.5, 0.0, 0.0) * speed, Vec3i(0, 1, 0));
+		if (Window::isKeyPressed(SDL_SCANCODE_D)) moveOriented(Vec3d(0.5, 0.0, 0.0) * speed, Vec3i(0, 1, 0));
+		if (Window::isKeyPressed(SDL_SCANCODE_SPACE)) moveOriented(Vec3d(0.0, 0.5, 0.0) * speed, Vec3i(0, 1, 0));
+		if (Window::isKeyPressed(SDL_SCANCODE_LCTRL) || Window::isKeyPressed(SDL_SCANCODE_RCTRL) || Window::isKeyPressed(SDL_SCANCODE_LALT)) moveOriented(Vec3d(0.0, -0.5, 0.0) * speed, Vec3i(0, 1, 0));
 	}
 
 private:

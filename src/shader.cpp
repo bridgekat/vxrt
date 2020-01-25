@@ -5,28 +5,14 @@
 #include <vector>
 #include "logger.h"
 
-void checkCompilation(GLuint shader, const std::string& msg) {
+void Shader::checkCompilation(const std::string& msg) {
 	int st = GL_TRUE;
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &st);
+	glGetShaderiv(mHandle, GL_COMPILE_STATUS, &st);
 	if (st == GL_FALSE) {
 		int infoLogLength = 0, charsWritten;
-		glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLogLength);
+		glGetShaderiv(mHandle, GL_INFO_LOG_LENGTH, &infoLogLength);
 		std::string infoLog(infoLogLength, ' ');
-		glGetShaderInfoLog(shader, infoLogLength, &charsWritten, &infoLog[0]);
-		std::stringstream ss;
-		ss << msg << "\n" << infoLog;
-		LogError(ss.str());
-	}
-}
-
-void checkLinking(GLuint program, const std::string& msg) {
-	int st = GL_TRUE;
-	glGetProgramiv(program, GL_LINK_STATUS, &st);
-	if (st == GL_FALSE) {
-		int infoLogLength = 0, charsWritten;
-		glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLogLength);
-		std::string infoLog(infoLogLength, ' ');
-		glGetProgramInfoLog(program, infoLogLength, &charsWritten, &infoLog[0]);
+		glGetShaderInfoLog(mHandle, infoLogLength, &charsWritten, &infoLog[0]);
 		std::stringstream ss;
 		ss << msg << "\n" << infoLog;
 		LogError(ss.str());
@@ -40,7 +26,7 @@ void Shader::loadFromFile(GLenum type, const std::string& filename) {
 	std::ifstream sourceFile(filename);
 	if (!sourceFile.is_open()) {
 		std::stringstream ss;
-		ss << "Could not open shader file:" << filename;
+		ss << "Could not open shader file: " << filename;
 		LogError(ss.str());
 		return;
 	}
@@ -54,7 +40,7 @@ void Shader::loadFromFile(GLenum type, const std::string& filename) {
 	int size = source.size();
 	glShaderSource(mHandle, 1, &p, &size);
 	glCompileShader(mHandle);
-	checkCompilation(mHandle, "Shader compilation error: \"" + filename + "\"");
+	checkCompilation("Shader compilation error: \"" + filename + "\"");
 }
 
 ShaderProgram::~ShaderProgram() {
@@ -83,7 +69,21 @@ void ShaderProgram::loadShadersFromFile(const std::string& vertex, const std::st
 	glAttachShader(mHandle, vsh.handle());
 	glAttachShader(mHandle, fsh.handle());
 	glLinkProgram(mHandle);
-	checkLinking(mHandle, "Shader program linking error:");
+	checkLinking("Shader program linking error:");
+}
+
+void ShaderProgram::checkLinking(const std::string& msg) {
+	int st = GL_TRUE;
+	glGetProgramiv(mHandle, GL_LINK_STATUS, &st);
+	if (st == GL_FALSE) {
+		int infoLogLength = 0, charsWritten;
+		glGetProgramiv(mHandle, GL_INFO_LOG_LENGTH, &infoLogLength);
+		std::string infoLog(infoLogLength, ' ');
+		glGetProgramInfoLog(mHandle, infoLogLength, &charsWritten, &infoLog[0]);
+		std::stringstream ss;
+		ss << msg << "\n" << infoLog;
+		LogError(ss.str());
+	}
 }
 
 void ShaderProgram::setUniform1f(const std::string& uniform, float v0) {

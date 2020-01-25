@@ -105,26 +105,28 @@ int main(){
 	mainProgram.create();
 	mainProgram.attach(mainShader);
 	mainProgram.link();
+	mainProgram.checkLinking("Shader program linking error:");
 
 	// Init voxels
 //	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
 //	tree.generate();
 
 //	ShaderBuffer ssbo(mainProgram, "TreeData", 0);
-//	tree.upload(ssbo);
+//	tree.upload(ssbo, true);
 
 	ShaderBuffer ssbo(mainProgram, "TreeData", 1);
-	size_t Size = 536870911;
+	size_t MaxNodes = 536870910;
+	size_t Size = MaxNodes + 1;
 	unsigned int* data = new unsigned int[Size];
 	memset(data, 0, sizeof(unsigned int) * Size);
-	data[0] = 2;
-	ssbo.update(sizeof(unsigned int) * Size, data);
+	data[0] = 1;
+	ssbo.update(sizeof(unsigned int) * Size, data, true);
 	delete[] data;
 
 	ShaderBuffer outBuffer(mainProgram, "OutputData", 2);
 	data = new unsigned int[1];
 	data[0] = 0;
-	outBuffer.update(sizeof(unsigned int) * 1, data);
+	outBuffer.update(sizeof(unsigned int) * 1, data, false);
 	delete[] data;
 	
 	// Init noise
@@ -205,7 +207,7 @@ int main(){
 		mainProgram.setUniform1i("FrameWidth", fbWidth);
 		mainProgram.setUniform1i("FrameHeight", fbHeight);
 		mainProgram.setUniform1i("FrameBufferSize", fbo[curr].size());
-		mainProgram.setUniform1i("MaxNodes", Size);
+		mainProgram.setUniform1i("MaxNodes", MaxNodes);
 
 		// Render scene (sample once for each pixel)
 		int outimageIndex = 0;
@@ -240,7 +242,7 @@ int main(){
 		while (!frameCounterScheduler.inSync()) {
 			std::stringstream ss;
 			if (!pathTracing) {
-				ss << "Voxel Raycasting Test (Static SVO, " << frameCounter << " fps)";
+				ss << "Voxel Raycasting Test (FPS: " << frameCounter << ", X: " << camera.position().x << ", Y: " << camera.position().y << ", Z: " << camera.position().z << ")";
 				frameCounter = 0;
 			} else {
 				ss << "Voxel Pathtracing Test (Static SVO, " << frameCounter << " samples per pixel)";

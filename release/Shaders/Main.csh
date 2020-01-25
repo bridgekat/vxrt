@@ -1,5 +1,7 @@
 #version 430 core
 
+// ===== Input constants =====
+
 layout(local_size_x = 8u, local_size_y = 8u, local_size_z = 1u) in;
 
 uniform mat4 ProjectionMatrix;
@@ -15,8 +17,9 @@ uniform sampler2D MinTexture;
 uniform float NoiseTextureSize;
 uniform vec2 NoiseOffset;
 uniform float Time;
-
+//uniform int RenderMode; // 0 for test, 1 for shadowed, 2 for profiling, 3 for pathtracing
 uniform int PathTracing;
+
 uniform sampler2D PrevFrame;
 uniform int SampleCount;
 uniform int FrameWidth;
@@ -25,53 +28,96 @@ uniform int FrameBufferSize;
 uniform int MaxNodes;
 
 layout(std430, binding = 1) buffer TreeData {
-	uint data[];
+	uint NodeCount;
+	uint Data[];
 };
+
+// ===== Output variables =====
+
+vec4 FragColor;
+uniform restrict writeonly image2D FrameBuffer;
 
 layout(std430, binding = 2) buffer OutputData {
 	uint OutputCount;
 };
 
-vec2 FragCoords;
-vec4 FragColor;
-uniform restrict writeonly image2D FrameBuffer;
+// ===== Structures & Constants =====
 
-uint allocateNodes(uint count) {
-	uint res = atomicAdd(data[0], count);
-	return res + count <= uint(MaxNodes) ? res : 0u;
-}
+#define AABB mat2x3
 
-// Constants
+struct Node {
+	uint data;
+	AABB box;
+};
+
+struct Intersection {
+	vec3 pos;
+	int face; // 0 for undefined, 1 ~ 6 for x+, x-, y+, y-, z+, z-
+};
 
 const float Eps = 1e-4;
 const float Pi = 3.14159265f;
 const float Gamma = 2.2f;
-const vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
+//#define LIGHTING_UNIFORM 1.0f
+//#define LIGHTING_SKY
+const vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f)); //normalize(vec3(cos(Time), -0.1f, sin(Time)));
 const float SunlightAngle = 0.996f;
-const float ProbabilityToSun = 0.0f;
-const uint MaxLevels = 12u; // Octree detail level
+
+// World size (maximum octree detail level)
+const uint MaxLevels = 16u;
+
+// Terrain generation
+//#define FRACTALNOISE_USE_TEXTURESAMPLER
+#define FRACTALNOISE_COSINE_INTERPOLATION
 const uint NoiseLevels = 8u; // Noise map detail level <= MaxLevels, matches the noise map resolution in main program
 const uint PartialLevels = 7u; // - Min noise level (using part of the noise map)
 const float HeightScale = float(1u << MaxLevels) / 256.0f;
 
-// Utilities
+// Level of details
+#define LEVEL_OF_DETAILS
+const float FoVy = 70.0f;
+const float VerticalResolution = 480.0f;
+const float LODQuality = 1.0f;
+
+// Path tracing
+const int MaxTracedRays = 4;
+//#define ANTIALIASING
+#define LAMBERTIAN_DIFFUSE
+const float DiffuseFactor = 0.5f;
+const float ProbabilityToSun = 0.5f;
+
+// Fps will be effectively halved (at least on GTX1060 Max-Q, driver 441.20) if you make these arrays constant!
+int BackFace[7] = int[](0, 2, 1, 4, 3, 6, 5);
+vec3 Normal[7] = vec3[](
+	vec3( 0.0f, 0.0f, 0.0f),
+	vec3(+1.0f, 0.0f, 0.0f),
+	vec3(-1.0f, 0.0f, 0.0f),
+	vec3( 0.0f,+1.0f, 0.0f),
+	vec3( 0.0f,-1.0f, 0.0f),
+	vec3( 0.0f, 0.0f,+1.0f),
+	vec3( 0.0f, 0.0f,-1.0f)
+);
+vec3 Palette[7] = vec3[](
+	vec3(0.0f, 0.0f, 0.0f),
+	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(151.0f, 228.0f, 90.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(144.0f, 105.0f, 64.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
+	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma))
+);
+vec3 Dither[3] = vec3[](
+	vec3(12.1322f, 23.1313423f, 34.959f),
+	vec3(23.183f, 11.232f, 54.9923f),
+	vec3(345.99253f, 2345.2323f, 78.1233f)
+);
+
+// ===== Utilities =====
 
 vec3 divide(vec4 v) { return (v / v.w).xyz; }
+bool inside(vec3 a, AABB box) { return all(greaterThanEqual(a, box[0])) && all(lessThan(a, box[1])); }
 
-// PRNG
-
-uint hash(uint x) {
-	x += x << 10u;
-	x ^= x >> 6u;
-	x += x << 3u;
-	x ^= x >> 11u;
-	x += x << 15u;
-	return x;
-}
-
-uint hash(uvec2 v) { return hash(v.x ^ hash(v.y)); }
-uint hash(uvec3 v) { return hash(v.x ^ hash(v.yz)); }
-uint hash(uvec4 v) { return hash(v.x ^ hash(v.yzw)); }
+// ===== PRNG =====
 
 float constructFloat(uint m) {
 	const uint IEEEMantissa = 0x007FFFFFu;
@@ -79,63 +125,41 @@ float constructFloat(uint m) {
 	m = m & IEEEMantissa | IEEEOne;
 	return uintBitsToFloat(m) - 1.0f;
 }
-
+uint hash(uint x) { x += x << 10u; x ^= x >> 6u; x += x << 3u; x ^= x >> 11u; x += x << 15u; return x; }
+uint hash(uvec2 v) { return hash(v.x ^ hash(v.y)); }
+uint hash(uvec3 v) { return hash(v.x ^ hash(v.yz)); }
+uint hash(uvec4 v) { return hash(v.x ^ hash(v.yzw)); }
 float rand(vec3 v) { return constructFloat(hash(floatBitsToUint(vec4(v, RandomSeed)))); }
 
-// Main Part
+// ===== Main Part =====
 
-struct AABB {
-	vec3 a, b;
-};
-
-bool inside(vec3 a, AABB box) {
-	return a.x >= box.a.x && a.x < box.b.x && 
-		a.y >= box.a.y && a.y < box.b.y &&
-		a.z >= box.a.z && a.z < box.b.z;
+uint allocateNodes(uint count) {
+	uint res = atomicAdd(NodeCount, count);
+	return res + count <= uint(MaxNodes) ? res : 0u;
 }
-
-const uint Root = 1u;
-const int MaxTracedRays = 4;
-const float DiffuseFactor = 0.5f;
-#define LAMBERTIAN_DIFFUSE
-//#define REDUNDANCY_CHECK
 
 // Least significant 2bits: [00] not generated; [01] intermediate; [11] leaf
-#define getPrimitiveData(ind) data[ind]
-bool generated1(uint data) { return (data & 1u) != 0u; }
-bool isLeaf1(uint data) { return (data & 3u) == 3u; }
-uint getChildrenPtr1(uint data) { return data >> 2u; }
-uint getLeafData1(uint data) { return data >> 2u; }
-uint makeIntermediateNodeData(uint ind) { return (ind << 2u) + 1u; }
-uint makeLeafNodeData(uint data) { return (data << 2u) + 3u; }
-
-struct Node {
-	uint data;
-	AABB box;
-};
+#define getPrimitiveData(ind) Data[ind]
+#define isLeaf(data) ((data & 3u) == 3u)
+#define getChildrenPtr(data) (data >> 2u)
+#define getLeafData(data) (data >> 2u)
+#define makeIntermediateNodeData(ind) ((ind << 2u) + 1u)
+#define makeLeafNodeData(data) ((data << 2u) + 3u)
 
 // Level 0: least detailed (one pixel)
-/*
-float linearSample(vec2 pos) {
-	ivec2 p = ivec2(pos * NoiseTextureSize);
-	vec2 f = fract(pos * NoiseTextureSize);
-	int size = int(NoiseTextureSize);
-	float t00 = texelFetch(NoiseTexture, (p + ivec2(0, 0)) % size, 0).r, t10 = texelFetch(NoiseTexture, (p + ivec2(1, 0)) % size, 0).r;
-	float t01 = texelFetch(NoiseTexture, (p + ivec2(0, 1)) % size, 0).r, t11 = texelFetch(NoiseTexture, (p + ivec2(1, 1)) % size, 0).r;
-	return t00 * (1.0f - f.x) * (1.0f - f.y) + t01 * (1.0f - f.x) * f.y + t10 * f.x * (1.0f - f.y) + t11 * f.x * f.y;
-}
+
+#ifdef FRACTALNOISE_USE_TEXTURESAMPLER
 
 #define F(x, y) (textureLod(NoiseTexture, pos + vec2(x, y) + vec2(0.5f) / NoiseTextureSize, 0.0f).r)
-//#define F(x, y) (linearSample(pos + vec2(x, y)))
-
 float maxNoise2DSubpixel(uint level, uvec2 x) {
 	float size = 1.0f / float(1u << level);
 	vec2 pos = vec2(x) * size;
 	return max(max(F(0, 0), F(size, 0)), max(F(0, size), F(size, size)));
 }
-
 #undef F
-*/
+
+#else
+
 /*
 float maxNoise2DSubpixel(uint level, uvec2 x) {
 	float size = NoiseTextureSize / float(1u << level);
@@ -168,160 +192,138 @@ float maxNoise2DSubpixel(uint level, uvec2 x) {
 	vec2 fpos = fract(pos);
 	vec4 fx = vec4(fpos.x, fpos.x + size, fpos.x, fpos.x + size);
 	vec4 fy = vec4(fpos.y, fpos.y, fpos.y + size, fpos.y + size);
+#ifdef FRACTALNOISE_COSINE_INTERPOLATION
+	fx = (vec4(1.0f) - cos(Pi * fx)) / 2.0f;
+	fy = (vec4(1.0f) - cos(Pi * fy)) / 2.0f;
+#endif
 	vec4 res = mat4((vec4(1.0f) - fx) * (vec4(1.0f) - fy), fx * (vec4(1.0f) - fy), (vec4(1.0f) - fx) * fy, fx * fy) * tex;
 	return max(max(res[0], res[1]), max(res[2], res[3]));
 }
+
+#endif
 
 float maxNoise2D(uint level, uvec2 x) {
 	if (level > NoiseLevels) return maxNoise2DSubpixel(level, x);
 //	if (x.x >= (1u << NoiseLevels) || x.y >= (1u << NoiseLevels)) discard;
 	return texelFetch(MaxTexture, ivec2(x), int(NoiseLevels - level)).r;
 }
-
-uint getMaxHeight(uint level, uvec2 pos) {
+/*
+float Factor[16] = float[](
+	1.0f, 1.0f, 1.0f, 1.0f, // Low freq
+	1.0f, 1.0f, 1.0f, 1.0f,
+	1.0f, 1.0f, 1.0f, 1.0f,
+	1.0f, 1.0f, 1.0f, 1.0f  // High freq
+);
+*/
+float getMaxHeight(uint level, uvec2 pos) {
 	float res = 0.0f, amplitude = pow(2.0f, float(PartialLevels));
 	level += PartialLevels;
 	for (uint i = 0u; i <= MaxLevels - NoiseLevels + PartialLevels; i++) {
-		float curr = maxNoise2D(level, pos);
-		res += curr * amplitude;
-		amplitude /= 2.0f;
+		res += maxNoise2D(level, pos) * amplitude; //* Factor[i];
+		amplitude *= 0.5f;
 		if (level > 0u) {
 			level--;
 			pos -= (pos & (1u << level));
 		}
 	}
-	return uint(res * HeightScale);
+	return res * HeightScale;
 }
 
 // TODO: use an "averaging" approximation in LOD
 vec3 lodCenterPos, lodViewDir;
 bool lodCheck(uint level, uvec3 pos) {
+#ifndef LEVEL_OF_DETAILS
 	return true;
+#endif
 	vec3 rpos = (vec3(pos) + vec3(0.5f)) * float(RootSize) / float(1u << level) - lodCenterPos;
 	float size = sqrt(3.0f) * float(RootSize) / float(1u << level);
-	return tan(35.0f / 180.0f * Pi) * dot(rpos, lodViewDir) * 2.0f / 480.0f <= size; // 480p, vertical fov = 70 degrees
+	return tan(FoVy / 2.0f / 180.0f * Pi) * dot(rpos, lodViewDir) * 2.0f / VerticalResolution / LODQuality <= size;
 }
 
 int generateNodeTerrain(uint level, uvec3 pos) {
-	if ((getMaxHeight(level, pos.xz) >> (MaxLevels - level)) < pos.y) return 0;
+	if ((uint(getMaxHeight(level, pos.xz)) >> (MaxLevels - level)) < pos.y) return 0;
 //	if (((getMinHeight(level, pos.xz) + 1u) >> (MaxLevels - level)) > pos.y) return 0;
-	return (level < MaxLevels && lodCheck(level, pos)) ? -1 : 1;
+	return (level < MaxLevels) ? -1 : 1;
 }
 
-//int redundantSubdivisionCount = 0;
-/*
 Node getNodeAt(vec3 pos) {
 	AABB box = AABB(vec3(0.0f), vec3(float(RootSize)));
 	if (!inside(pos, box)) return Node(0u, box); // Outside
-	uint ptr = 1u, cdata = 0u;
+	uint ptr = 0u, cdata = 0u;
 	for (uint level = 0u; level <= MaxLevels; level++) {
-		cdata = data[ptr];
-		if (!generated1(cdata)) {
-			if (atomicCompSwap(data[ptr], 0u, 1u) == 0u) {
+//		if (!lodCheck(level, uvec3(pos) >> (MaxLevels - level))) return Node(makeLeafNodeData(1u), box);
+		cdata = Data[ptr];
+		if (cdata == 0u) {
+			if (!lodCheck(level, uvec3(pos) >> (MaxLevels - level))) return Node(makeLeafNodeData(1u), box);
+			if (atomicCompSwap(Data[ptr], 0u, 1u) == 0u) { // Not generated, generate node!
 				int curr = generateNodeTerrain(level, uvec3(pos) >> (MaxLevels - level));
 				cdata = curr < 0 ? makeIntermediateNodeData(allocateNodes(8)) : makeLeafNodeData(curr);
-				atomicExchange(data[ptr], cdata);
-			}
+				atomicExchange(Data[ptr], cdata);
+			} else return Node(makeLeafNodeData(0u), box); // Being generated by another invocation. Will be rendered next frame.
 		}
-		if (cdata == 1u) return Node(0u, box); // Generated by another invocation this frame. Will be rendered next frame.
-		if (isLeaf1(cdata)) break;
-		ptr = getChildrenPtr1(cdata);
-		vec3 mid = (box.a + box.b) / 2.0f;
-		if (pos.x >= mid.x) {
-			ptr += 1u;
-			box.a.x = mid.x;
-		} else box.b.x = mid.x;
-		if (pos.y >= mid.y) {
-			ptr += 2u;
-			box.a.y = mid.y;
-		} else box.b.y = mid.y;
-		if (pos.z >= mid.z) {
-			ptr += 4u;
-			box.a.z = mid.z;
-		} else box.b.z = mid.z;
-	}
-	return Node(cdata, box);
-}
-*/
-Node getNodeAt(vec3 pos) {
-	AABB box = AABB(vec3(0.0f), vec3(float(RootSize)));
-	if (!inside(pos, box)) return Node(0u, box); // Outside
-	uint ptr = 1u, cdata = 0u;
-	for (uint level = 0u; level <= MaxLevels; level++) {
-		cdata = data[ptr];
-		if (!generated1(cdata)) {
-			if (atomicCompSwap(data[ptr], 0u, 1u) == 0u) {
-				int curr = generateNodeTerrain(level, uvec3(pos) >> (MaxLevels - level));
-				cdata = curr < 0 ? makeIntermediateNodeData(allocateNodes(8)) : makeLeafNodeData(curr);
-				atomicExchange(data[ptr], cdata);
-			} else return Node(makeLeafNodeData(0u), box);
-		}
-		if (cdata == 1u) return Node(makeLeafNodeData(0u), box); // Not fully generated this frame. Will be rendered next frame.
-		if (isLeaf1(cdata)) break;
-		ptr = getChildrenPtr1(cdata);
-		vec3 mid = (box.a + box.b) / 2.0f;
-		if (pos.x >= mid.x) {
-			ptr += 1u;
-			box.a.x = mid.x;
-		} else box.b.x = mid.x;
-		if (pos.y >= mid.y) {
-			ptr += 2u;
-			box.a.y = mid.y;
-		} else box.b.y = mid.y;
-		if (pos.z >= mid.z) {
-			ptr += 4u;
-			box.a.z = mid.z;
-		} else box.b.z = mid.z;
+		if (cdata == 1u) return Node(makeLeafNodeData(0u), box); // Being generated by another invocation. Will be rendered next frame.
+		if (isLeaf(cdata)) break; // Reached leaf (monotonous node)
+		ptr = getChildrenPtr(cdata);
+		vec3 mid = (box[0] + box[1]) * 0.5f;
+		if (pos.x >= mid.x) { ptr += 1u; box[0].x = mid.x; } else box[1].x = mid.x;
+		if (pos.y >= mid.y) { ptr += 2u; box[0].y = mid.y; } else box[1].y = mid.y;
+		if (pos.z >= mid.z) { ptr += 4u; box[0].z = mid.z; } else box[1].z = mid.z;
+		/*
+		bvec3 k = greaterThanEqual(pos, mid);
+		ptr += uint(k.x) * 1u + uint(k.y) * 2u + uint(k.z) * 4u;
+		box[0] = mix(box[0], mid, k);
+		box[1] = mix(mid, box[1], k);
+		*/
 	}
 	return Node(cdata, box);
 }
 
-struct Intersection {
-	vec3 pos;
-	int face; // 0 for undefined, 1 ~ 6 for x+, x-, y+, y-, z+, z-
-};
+uint getNodeLevel(vec3 pos) {
+	AABB box = AABB(vec3(0.0f), vec3(float(RootSize)));
+	if (!inside(pos, box)) return 0u; // Outside
+	uint ptr = 0u, cdata = 0u;
+	for (uint level = 0u; level <= MaxLevels; level++) {
+		cdata = Data[ptr];
+		if (!lodCheck(level, uvec3(pos) >> (MaxLevels - level)) || cdata <= 1u) return level;
+		if (isLeaf(cdata) || level == MaxLevels) return MaxLevels; // Reached leaf (monotonous node)
+		ptr = getChildrenPtr(cdata);
+		vec3 mid = (box[0] + box[1]) * 0.5f;
+		if (pos.x >= mid.x) { ptr += 1u; box[0].x = mid.x; } else box[1].x = mid.x;
+		if (pos.y >= mid.y) { ptr += 2u; box[0].y = mid.y; } else box[1].y = mid.y;
+		if (pos.z >= mid.z) { ptr += 4u; box[0].z = mid.z; } else box[1].z = mid.z;
+	}
+	return MaxLevels;
+}
 
-int BackFace[7] = int[7](0, 2, 1, 4, 3, 6, 5);
-vec3 Normal[7] = vec3[7](
-	vec3( 0.0f, 0.0f, 0.0f),
-	vec3(+1.0f, 0.0f, 0.0f),
-	vec3(-1.0f, 0.0f, 0.0f),
-	vec3( 0.0f,+1.0f, 0.0f),
-	vec3( 0.0f,-1.0f, 0.0f),
-	vec3( 0.0f, 0.0f,+1.0f),
-	vec3( 0.0f, 0.0f,-1.0f)
-);
-
-Intersection innerIntersect(vec3 org, vec3 dir, AABB box, int ignore) {
-	float scale[7];
-	scale[0] = 0.0f;
-	scale[1] = (box.a.x - org.x) / dir.x; // x- (Reversed from normal)
-	scale[2] = (box.b.x - org.x) / dir.x; // x+
-	scale[3] = (box.a.y - org.y) / dir.y; // y-
-	scale[4] = (box.b.y - org.y) / dir.y; // y+
-	scale[5] = (box.a.z - org.z) / dir.z; // z-
-	scale[6] = (box.b.z - org.z) / dir.z; // z+
+Intersection innerIntersect(vec3 org, vec3 dir, AABB box/*, int ignore*/) {
+	float scale[7] = float[](
+		0.0f,
+		(box[0].x - org.x) / dir.x, // x- (Reversed from normal)
+		(box[1].x - org.x) / dir.x, // x+
+		(box[0].y - org.y) / dir.y, // y-
+		(box[1].y - org.y) / dir.y, // y+
+		(box[0].z - org.z) / dir.z, // z-
+		(box[1].z - org.z) / dir.z  // z+
+	);
 	int face = 0;
-	for (int i = 1; i <= 6; i++) if (dot(dir, Normal[i]) < 0.0f && scale[i] > 0.0f) {
-		if (face == 0 || scale[i] < scale[face]) face = i;
-	}
+	for (int i = 1; i <= 6; i++) if (dot(dir, Normal[i]) < 0.0f && scale[i] > 0.0f && 
+			(face == 0 || scale[i] < scale[face])) face = i;
 	return Intersection(org + dir * scale[face], face);
 }
 
 Intersection outerIntersect(vec3 org, vec3 dir, AABB box) {
-	float scale[7];
-	scale[0] = 0.0f;
-	scale[1] = (box.b.x - org.x) / dir.x; // x+
-	scale[2] = (box.a.x - org.x) / dir.x; // x-
-	scale[3] = (box.b.y - org.y) / dir.y; // y+
-	scale[4] = (box.a.y - org.y) / dir.y; // y-
-	scale[5] = (box.b.z - org.z) / dir.z; // z+
-	scale[6] = (box.a.z - org.z) / dir.z; // z-
+	float scale[7] = float[](
+		0.0f,
+		(box[1].x - org.x) / dir.x, // x+
+		(box[0].x - org.x) / dir.x, // x-
+		(box[1].y - org.y) / dir.y, // y+
+		(box[0].y - org.y) / dir.y, // y-
+		(box[1].z - org.z) / dir.z, // z+
+		(box[0].z - org.z) / dir.z  // z-
+	);
 	int face = 0;
-	for (int i = 1; i <= 6; i++) if (scale[i] > 0.0f) {
-		vec3 curr = org + dir * scale[i];
-		if ((face == 0 || scale[i] < scale[face]) && inside(curr - 0.1f * Normal[i], box)) face = i;
-	}
+	for (int i = 1; i <= 6; i++) if (scale[i] > 0.0f && inside((org + dir * scale[i]) - 0.1f * Normal[i], box) &&
+		(face == 0 || scale[i] < scale[face])) face = i;
 	return Intersection(org + dir * scale[face], face);
 }
 
@@ -329,12 +331,11 @@ Intersection rayMarch(Intersection p, vec3 dir) {
 	dir = normalize(dir);
 	AABB box = AABB(vec3(0.0f), vec3(float(RootSize))); // Root box
 	if (!inside(p.pos, box)) p = outerIntersect(p.pos, dir, box);
-	
 	for (int i = 0; i < RootSize; i++) {
 		Node node = getNodeAt(p.pos - 0.1f * Normal[p.face]);
 		if (node.data == 0u) break; // Out of range
-		if (getLeafData1(node.data) != 0u) return p; // Opaque block
-		p = innerIntersect(p.pos, dir, node.box, BackFace[p.face]);
+		if (getLeafData(node.data) != 0u) return p; // Opaque block
+		p = innerIntersect(p.pos, dir, node.box/*, BackFace[p.face]*/);
 	}	
 	return Intersection(p.pos, 0);
 }
@@ -344,19 +345,22 @@ int marchProfiler(vec3 org, vec3 dir) {
 	AABB box = AABB(vec3(0.0f), vec3(float(RootSize))); // Root box
 	Intersection p = Intersection(org, 0);
 	if (!inside(p.pos, box)) p = outerIntersect(p.pos, dir, box);
-	
 	for (int i = 0; i < RootSize; i++) {
 		Node node = getNodeAt(p.pos - 0.1f * Normal[p.face]);
-		if (node.data == 0u || getLeafData1(node.data) != 0u) return i;
-		p = innerIntersect(p.pos, dir, node.box, BackFace[p.face]);
+		if (node.data == 0u || getLeafData(node.data) != 0u) return i;
+		p = innerIntersect(p.pos, dir, node.box/*, BackFace[p.face]*/);
 	}	
 	return RootSize;
 }
 
 vec3 getSkyColor(in vec3 org, in vec3 dir) {
-	return vec3(1.0f);
+#ifdef LIGHTING_UNIFORM
+	return vec3(LIGHTING_UNIFORM);
+#endif
 	float sun = mix(0.0f, 0.7f, clamp(smoothstep(SunlightAngle, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f)) * 400.0f;
+#ifndef LIGHTING_SKY
 	return vec3(sun);
+#endif
 	sun += mix(0.0f, 0.3f, clamp(smoothstep(0.1f, 1.0f, dot(dir, -SunlightDirection)), 0.0f, 1.0f));
 	vec3 sky = mix(
 		vec3(152.0f / 255.0f, 211.0f / 255.0f, 250.0f / 255.0f),
@@ -364,49 +368,8 @@ vec3 getSkyColor(in vec3 org, in vec3 dir) {
 		smoothstep(0.0f, 1.0f, normalize(dir).y * 2.0f)
 	);
 	vec3 res = mix(sky, vec3(1.0f, 1.0f, 1.0f), sun);
-//	vec4 cloudColor = cloud(org, dir, CloudStep, CloudDistance);
-//	res = cloudColor.rgb + (1.0 - cloudColor.a) * res;
 	return res;
 }
-
-///*
-vec3 Palette[7] = vec3[7](
-	vec3(0.0f, 0.0f, 0.0f),
-	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(151.0f, 228.0f, 90.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(144.0f, 105.0f, 64.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(147.5f, 166.4f, 77.0f) / 255.0f, vec3(Gamma))
-);
-//*/
-/*
-vec3 Palette[7] = vec3[7](
-	vec3(0.0f, 0.0f, 0.0f),
-	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
-	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
-	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
-	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
-	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma)),
-	pow(vec3(0.5f, 0.8f, 0.9f), vec3(Gamma))
-);
-*/
-/*
-vec3 Palette[7] = vec3[7](
-	vec3(0.0f, 0.0f, 0.0f),
-	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma)),
-	pow(vec3(238.0f, 213.0f, 255.0f) / 255.0f, vec3(Gamma))
-);
-*/
-vec3 Dither[3] = vec3[3](
-	vec3(12.1322f, 23.1313423f, 34.959f),
-	vec3(23.183f, 11.232f, 54.9923f),
-	vec3(345.99253f, 2345.2323f, 78.1233f)
-);
 
 vec3 rayTrace(vec3 org, vec3 dir) {
 	dir = normalize(dir);
@@ -469,20 +432,44 @@ vec3 shadowTrace(vec3 org, vec3 dir) {
 	
 	vec3 col = Palette[p.face];
 	res *= col;
-	org = p.pos;
-	vec3 normal = Normal[p.face];
-	dir = reflect(dir, normal);
-	int face = p.face;
-	p.pos += Eps * dir;
 	
-	vec3 SunlightDirection = normalize(vec3(0.6f, -1.0f, 0.3f));
-	p = rayMarch(Intersection(p.pos, 0), -SunlightDirection);
-	float sunlight = clamp(dot(Normal[face], -SunlightDirection), -1.0f, 1.0f);
+	float sunlight = clamp(dot(Normal[p.face], -SunlightDirection), -1.0f, 1.0f);
 	sunlight = sunlight / 2.0f + 0.5f;
-	if (p.face != 0) sunlight *= 0.5f;
+	p.pos += Eps * (-SunlightDirection);
+	if (dot(Normal[p.face], -SunlightDirection) <= 0.0f ||
+			rayMarch(Intersection(p.pos, 0), -SunlightDirection).face != 0u) sunlight *= 0.5f;
 	res *= sunlight;
 	
 	return res;
+}
+
+vec3 testTrace(vec3 org, vec3 dir) {
+	vec3 res = vec3(1.0f);
+	Intersection p = Intersection(org, 0);
+	
+	p = rayMarch(p, dir);
+	if (p.face == 0) return res * getSkyColor(org, dir);
+	
+	vec3 col = Palette[p.face];
+//	res *= col;
+	org = p.pos - 0.1f * Normal[p.face];
+	
+	uint level = getNodeLevel(org);
+	float H00 = getMaxHeight(level, (uvec2(org.xz) >> (MaxLevels - level)) + uvec2(0u, 0u));
+	float H10 = getMaxHeight(level, (uvec2(org.xz) >> (MaxLevels - level)) + uvec2(1u, 0u));
+	float H01 = getMaxHeight(level, (uvec2(org.xz) >> (MaxLevels - level)) + uvec2(0u, 1u));
+	float dHdx = (H10 - H00) / pow(2.0f, float(MaxLevels - level));
+	float dHdz = (H01 - H00) / pow(2.0f, float(MaxLevels - level));
+	vec3 normal = normalize(cross(vec3(0.0f, dHdz, 1.0f), vec3(1.0f, dHdx, 0.0f)));
+	
+	float sunlight = clamp(dot(normal, -SunlightDirection), 0.0f, 1.0f);
+//	sunlight = sunlight / 2.0f + 0.5f;
+//	p.pos += Eps * (-SunlightDirection);
+//	if (dot(Normal[p.face], -SunlightDirection) <= 0.0f ||
+//			rayMarch(Intersection(p.pos, 0), -SunlightDirection).face != 0u) sunlight *= 0.5f;
+	res *= sunlight;
+	
+	return res; //vec3(float(level) / 17.0f);
 }
 
 // Depth of Field
@@ -497,12 +484,16 @@ void apertureDither(inout vec3 pos, inout vec3 dir, float focalDist, float apert
 void main() {
 	ivec2 outputPixelCoords = ivec3(gl_GlobalInvocationID).xy;
 	if (outputPixelCoords.x >= FrameWidth || outputPixelCoords.y >= FrameHeight) return;
-	FragCoords = vec2(outputPixelCoords) / vec2(float(FrameWidth), float(FrameHeight)) * 2.0f - vec2(1.0f);
+	vec2 FragCoords = vec2(outputPixelCoords) / vec2(float(FrameWidth), float(FrameHeight)) * 2.0f - vec2(1.0f);
 	
 	RootSize = 1 << int(MaxLevels);
 	
 	float randx = rand(vec3(FragCoords, 1.0f)) * 2.0f - 1.0f, randy = rand(vec3(FragCoords, -1.0f)) * 2.0f - 1.0f;
+#ifdef ANTIALIASING
 	vec2 ditheredCoords = FragCoords + vec2(randx / float(FrameWidth), randy / float(FrameHeight)); // Anti-aliasing
+#else
+	vec2 ditheredCoords = FragCoords;
+#endif
 	
 	vec4 fragPosition = ModelViewInverse * ProjectionInverse * vec4(ditheredCoords, 1.0f, 1.0f);
 	vec4 centerFragPosition = ModelViewInverse * ProjectionInverse * vec4(0.0f, 0.0f, 1.0f, 1.0f);
@@ -510,18 +501,14 @@ void main() {
 	vec3 dir = normalize(divide(fragPosition));
 	vec3 centerDir = normalize(divide(centerFragPosition));
 	
-	vec3 pos = CameraPosition * 160.0f + vec3(23.3f, float(RootSize) / 8.0f + 23.3f, 23.3f);
+	vec3 pos = CameraPosition + vec3(float(RootSize) / 2.0f + 0.233f, float(RootSize) + 0.233f, float(RootSize) / 2.0f + 0.233f);
 	apertureDither(pos, dir, float(RootSize) / 6.0f / dot(dir, centerDir), 0.0f);
 	
 	lodCenterPos = pos, lodViewDir = centerDir;
 	
 	vec3 color = vec3(0.0f);
-	if (PathTracing == 0) color = vec3(float(marchProfiler(pos, dir)) / 256.0f); //shadowTrace(pos, dir);
+	if (PathTracing == 0) color = testTrace(pos, dir); //vec3(float(marchProfiler(pos, dir)) / 256.0f); //shadowTrace(pos, dir);
 	else color = rayTrace(pos, dir);
-	
-#ifdef REDUNDANCY_CHECK
-	if (redundantSubdivisionCount > 0) color = vec3(1.0f * float(redundantSubdivisionCount) / float(MaxLevels), color.gb);
-#endif
 	
 	if (PathTracing == 0) FragColor = vec4(color, 1.0f);
 	else if (SampleCount == 0) FragColor = vec4(color, 1.0f);
@@ -530,13 +517,6 @@ void main() {
 		FragColor = vec4((color + texel * float(SampleCount)) / float(SampleCount + 1), 1.0f);
 	}
 	
-//	uint curr = atomicAdd(Count, 1u);
-//	groupMemoryBarrier();
-
-//	if (gl_LocalInvocationID.x == 7u && gl_LocalInvocationID.y == 7u) {
-//		FragColor.rgb = vec3(float(curr) / 64.0f);
-//	}
-	
 	imageStore(FrameBuffer, outputPixelCoords, FragColor);
-	if (outputPixelCoords.x == 0 && outputPixelCoords.y == 0) OutputCount = data[0];
+	if (outputPixelCoords.xy == ivec2(0, 0)) OutputCount = NodeCount;
 }

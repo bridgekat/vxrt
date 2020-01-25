@@ -7,6 +7,7 @@ class Shader {
 public:
 	~Shader() { glDeleteShader(mHandle); }
 
+	void checkCompilation(const std::string& msg);
 	void loadFromFile(GLenum type, const std::string& filename);
 
 	GLenum type() const noexcept { return mType; }
@@ -26,7 +27,7 @@ public:
 	void create() { mHandle = glCreateProgram(); }
 	void attach(const Shader& shader) { glAttachShader(mHandle, shader.handle()); }
 	void link() { glLinkProgram(mHandle); }
-
+	void checkLinking(const std::string& msg);
 	void loadShadersFromFile(const std::string& vertex, const std::string& fragment);
 
 	void bind() const { glUseProgram(mHandle); }

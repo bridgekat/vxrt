@@ -122,13 +122,10 @@
     <None Include="..\..\release\Shaders\Present.fsh">
       <Filter>Shaders</Filter>
     </None>
-    <None Include="..\..\release\Shaders\Final.fsh">
-      <Filter>Shaders</Filter>
-    </None>
-    <None Include="..\..\release\Shaders\Final.vsh">
-      <Filter>Shaders</Filter>
-    </None>
     <None Include="..\..\release\Shaders\Present.vsh">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\..\release\Shaders\Main.csh">
       <Filter>Shaders</Filter>
     </None>
   </ItemGroup>

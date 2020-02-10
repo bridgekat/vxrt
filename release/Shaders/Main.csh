@@ -19,6 +19,7 @@ uniform vec2 NoiseOffset;
 uniform float Time;
 //uniform int RenderMode; // 0 for test, 1 for shadowed, 2 for profiling, 3 for pathtracing
 uniform int PathTracing;
+uniform int ProfilerOn;
 
 uniform sampler2D PrevFrame;
 uniform int SampleCount;
@@ -130,12 +131,15 @@ uint hash(uvec2 v) { return hash(v.x ^ hash(v.y)); }
 uint hash(uvec3 v) { return hash(v.x ^ hash(v.yz)); }
 uint hash(uvec4 v) { return hash(v.x ^ hash(v.yzw)); }
 float rand(vec3 v) { return constructFloat(hash(floatBitsToUint(vec4(v, RandomSeed)))); }
+float rand3(vec3 v) { return constructFloat(hash(floatBitsToUint(v))); }
 
 // ===== Main Part =====
 
 uint allocateNodes(uint count) {
 	uint res = atomicAdd(NodeCount, count);
-	return res + count <= uint(MaxNodes) ? res : 0u;
+	if (res + count > uint(MaxNodes)) return 0u;
+	for (uint i = 0; i < count; i++) Data[res + i] = 0u;
+	return res;
 }
 
 // Least significant 2bits: [00] not generated; [01] intermediate; [11] leaf
@@ -268,12 +272,12 @@ Node getNodeAt(vec3 pos) {
 		if (pos.x >= mid.x) { ptr += 1u; box[0].x = mid.x; } else box[1].x = mid.x;
 		if (pos.y >= mid.y) { ptr += 2u; box[0].y = mid.y; } else box[1].y = mid.y;
 		if (pos.z >= mid.z) { ptr += 4u; box[0].z = mid.z; } else box[1].z = mid.z;
-		/*
+/*
 		bvec3 k = greaterThanEqual(pos, mid);
 		ptr += uint(k.x) * 1u + uint(k.y) * 2u + uint(k.z) * 4u;
 		box[0] = mix(box[0], mid, k);
 		box[1] = mix(mid, box[1], k);
-		*/
+*/
 	}
 	return Node(cdata, box);
 }
@@ -489,10 +493,9 @@ void main() {
 	RootSize = 1 << int(MaxLevels);
 	
 	float randx = rand(vec3(FragCoords, 1.0f)) * 2.0f - 1.0f, randy = rand(vec3(FragCoords, -1.0f)) * 2.0f - 1.0f;
-#ifdef ANTIALIASING
-	vec2 ditheredCoords = FragCoords + vec2(randx / float(FrameWidth), randy / float(FrameHeight)); // Anti-aliasing
-#else
 	vec2 ditheredCoords = FragCoords;
+#ifdef ANTIALIASING
+	if (PathTracing != 0) ditheredCoords += vec2(randx / float(FrameWidth), randy / float(FrameHeight)); // Anti-aliasing
 #endif
 	
 	vec4 fragPosition = ModelViewInverse * ProjectionInverse * vec4(ditheredCoords, 1.0f, 1.0f);
@@ -507,7 +510,7 @@ void main() {
 	lodCenterPos = pos, lodViewDir = centerDir;
 	
 	vec3 color = vec3(0.0f);
-	if (PathTracing == 0) color = testTrace(pos, dir); //vec3(float(marchProfiler(pos, dir)) / 256.0f); //shadowTrace(pos, dir);
+	if (PathTracing == 0) color = (ProfilerOn == 0) ? testTrace(pos, dir) : vec3(float(marchProfiler(pos, dir)) / 64.0f);
 	else color = rayTrace(pos, dir);
 	
 	if (PathTracing == 0) FragColor = vec4(color, 1.0f);

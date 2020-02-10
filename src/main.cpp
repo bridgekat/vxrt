@@ -108,26 +108,31 @@ int main(){
 	mainProgram.checkLinking("Shader program linking error:");
 
 	// Init voxels
-//	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
-//	tree.generate();
-
-//	ShaderBuffer ssbo(mainProgram, "TreeData", 0);
-//	tree.upload(ssbo, true);
-
+/*
+	Tree tree(Config::getInt("World.Size", 256), Config::getInt("World.Height", 256));
+	tree.generate();
 	ShaderBuffer ssbo(mainProgram, "TreeData", 1);
-	size_t MaxNodes = 536870910;
+	tree.upload(ssbo, true);
+	size_t MaxNodes = 0;
+*/
+	ShaderBuffer ssbo(mainProgram, "TreeData", 1);
+	const size_t MaxNodes = Config::getInt("World.MaxNodes", 268435454);
+/*
 	size_t Size = MaxNodes + 1;
 	unsigned int* data = new unsigned int[Size];
 	memset(data, 0, sizeof(unsigned int) * Size);
 	data[0] = 1;
-	ssbo.update(sizeof(unsigned int) * Size, data, true);
+	ssbo.upload(sizeof(unsigned int) * Size, data, true);
 	delete[] data;
+*/
+	unsigned int initialHeader = 1;
+	ssbo.allocateImmutable(sizeof(initialHeader) + sizeof(unsigned int) * MaxNodes, true);
+	ssbo.uploadSubData(0, sizeof(initialHeader), &initialHeader);
 
 	ShaderBuffer outBuffer(mainProgram, "OutputData", 2);
-	data = new unsigned int[1];
-	data[0] = 0;
-	outBuffer.update(sizeof(unsigned int) * 1, data, false);
-	delete[] data;
+	unsigned int initialData = 0;
+	outBuffer.allocateImmutable(sizeof(initialData));
+	outBuffer.uploadSubData(0, sizeof(initialData), &initialData);
 	
 	// Init noise
 	const int NoiseTextureSize = 256, OffsetX = 37, OffsetY = 17;
@@ -201,6 +206,7 @@ int main(){
 		mainProgram.setUniform1f("NoiseTextureSize", NoiseTextureSize);
 		mainProgram.setUniform2f("NoiseOffset", OffsetX, OffsetY);
 		mainProgram.setUniform1i("PathTracing", int(pathTracing));
+		mainProgram.setUniform1i("ProfilerOn", Window::isKeyPressed(SDL_SCANCODE_M) ? 1 : 0);
 		mainProgram.setUniform1f("Time", float(UpdateScheduler::timeFromEpoch() - startTime));
 		mainProgram.setUniform1i("PrevFrame", 0);
 		mainProgram.setUniform1i("SampleCount", frameCounter);
@@ -208,7 +214,7 @@ int main(){
 		mainProgram.setUniform1i("FrameHeight", fbHeight);
 		mainProgram.setUniform1i("FrameBufferSize", fbo[curr].size());
 		mainProgram.setUniform1i("MaxNodes", MaxNodes);
-
+		
 		// Render scene (sample once for each pixel)
 		int outimageIndex = 0;
 		mainProgram.setUniform1i("FrameBuffer", outimageIndex);
@@ -318,6 +324,26 @@ int main(){
 			}
 			ppressed = true;
 		} else ppressed = false;
+
+		static bool cpressed = false;
+		if (Window::isKeyPressed(SDL_SCANCODE_C)) {
+			if (!cpressed) {
+				Tree curr(1, 1);
+				curr.download(ssbo);
+				curr.check();
+			}
+			cpressed = true;
+		} else cpressed = false;
+
+		static bool gpressed = false;
+		if (Window::isKeyPressed(SDL_SCANCODE_G)) {
+			if (!gpressed) {
+				Tree curr(1, 1), opt(1, 1);
+				curr.download(ssbo);
+				curr.gc(opt);
+				opt.upload(ssbo, false);
+			}
+		} else gpressed = false;
 
 		// Camera parameters
 		if (!pathTracing) {

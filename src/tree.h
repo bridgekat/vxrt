@@ -7,13 +7,13 @@
 class Tree {
 public:
 	struct TreeNode {
-		bool data;
-		bool leaf;
-		unsigned int children;
+		unsigned int generated : 1;
+		unsigned int leaf : 1;
+		unsigned int data : 30;
 	};
 	
 	Tree(int size, int height):
-		mNodeCount(0), mSize(size), mHeight(height), mHeightMap(new int[size * size]) {}
+		mSize(size), mHeight(height), mHeightMap(new int[size * size]) {}
 	
 	~Tree() {
 		delete[] mHeightMap;
@@ -21,15 +21,20 @@ public:
 	
 	int size() { return mSize; }
 	void generate();
-	void upload(ShaderBuffer& ssbo);
-	
+	void upload(ShaderBuffer& ssbo, bool allocate);
+	void download(ShaderBuffer& ssbo);
+	void check();
+	void gc(Tree& res);
+
 private:
 	std::vector<TreeNode> mNodes;
-	int mNodeCount, mSize, mHeight;
+	int mSize, mHeight;
 	long long mBlocksGenerated;
 	int* mHeightMap;
 	
 	void generateNode(size_t ind, int x0, int y0, int z0, int size);
+	int dfs(size_t ind, size_t& count, size_t& redundant);
+	int gcdfs(size_t ind, size_t rind, Tree& res);
 };
 
 #endif

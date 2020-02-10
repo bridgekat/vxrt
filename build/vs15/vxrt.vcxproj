@@ -184,14 +184,15 @@
     <ClInclude Include="..\..\src\worldgen.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\release\Shaders\Final.fsh" />
     <None Include="..\..\release\Shaders\Present.fsh" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\release\Shaders\Final.vsh">
+    <None Include="..\..\release\Shaders\Present.vsh">
       <FileType>Document</FileType>
     </None>
-    <None Include="..\..\release\Shaders\Present.vsh">
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\release\Shaders\Main.csh">
       <FileType>Document</FileType>
     </None>
   </ItemGroup>

@@ -21,7 +21,7 @@ void Renderer::init() {
 		glEnable(GL_ALPHA_TEST);
 		glAlphaFunc(GL_GREATER, 0.001f);
 	} else {
-		mFinal.loadShadersFromFile(std::string(ShaderPath) + "Final.vsh", std::string(ShaderPath) + "Final.fsh");
+//		mFinal.loadShadersFromFile(std::string(ShaderPath) + "Final.vsh", std::string(ShaderPath) + "Final.fsh");
 		mFinal.bind();
 	}
 

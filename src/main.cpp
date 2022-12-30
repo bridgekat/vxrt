@@ -73,7 +73,7 @@ TextureID loadNoiseMipmaps(const TextureImage& image, bool maximal) {
 	return id;
 }
 
-int main(){
+int main() {
 	Config::load();
 
 	Window& win = Window::getDefaultWindow("vxrt", 852, 480);
@@ -179,7 +179,9 @@ int main(){
 		int curr = frameCounter & 1;
 		if (!pathTracing) {
 			fbWidth = win.getWidth(), fbHeight = win.getHeight();
-			fbo[curr].create(fbWidth, fbHeight, 1, false);
+			if (!fbo[curr].created() || fbo[curr].width() != fbWidth || fbo[curr].height() != fbHeight) {
+				fbo[curr].create(fbWidth, fbHeight, 1, false);
+			}
 		}
 		Renderer::setRenderArea(0, 0, fbWidth, fbHeight);
 //		fbo[curr].bind();

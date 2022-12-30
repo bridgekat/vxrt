@@ -14,6 +14,8 @@ inline int log2Ceil(int x) {
 void FrameBuffer::create(int width, int height, int col, bool depth) {
 	if (mCreated) destroy();
 
+	mWidth = width;
+	mHeight = height;
 	mSize = width > height ? (1 << log2Ceil(width)) : (1 << log2Ceil(height));
 	mColorAttachCount = col;
 	mDepthAttach = depth;

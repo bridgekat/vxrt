@@ -13,6 +13,8 @@ public:
 	void create(int width, int height, int col, bool depth);
 	void destroy();
 	
+	int width() { return mWidth; }
+	int height() { return mHeight; }
 	int size() { return mSize; }
 	bool created() { return mCreated; }
 
@@ -47,7 +49,7 @@ public:
 	const GLuint* colorTextures() const { return mColorTextures; }
 
 private:
-	int mSize, mColorAttachCount;
+	int mWidth, mHeight, mSize, mColorAttachCount;
 	bool mCreated, mDepthAttach;
 	
 	GLuint mID, mColorTextures[16], mDepthTexture;

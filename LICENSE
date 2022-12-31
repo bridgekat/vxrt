@@ -46,16 +46,3 @@ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
 CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 THE POSSIBILITY OF SUCH DAMAGE.
-
-License of FindGLEW.cmake
--------------------------
-See cmake/FindGLEW.cmake.
-
-License of FindSDL2.cmake
--------------------------
-See cmake/FindSDL2.cmake
-
-License of FindSDL2_image.cmake
--------------------------------
-See cmake/FindSDL2_image.cmake
-

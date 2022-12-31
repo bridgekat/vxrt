@@ -1,151 +1,74 @@
 #include "shader.h"
 #include <fstream>
-#include <sstream>
 #include <memory>
+#include <sstream>
 #include <vector>
-#include "logger.h"
+#include "log.h"
 
-void Shader::checkCompilation(const std::string& msg) {
-	int st = GL_TRUE;
-	glGetShaderiv(mHandle, GL_COMPILE_STATUS, &st);
-	if (st == GL_FALSE) {
-		int infoLogLength = 0, charsWritten;
-		glGetShaderiv(mHandle, GL_INFO_LOG_LENGTH, &infoLogLength);
-		std::string infoLog(infoLogLength, ' ');
-		glGetShaderInfoLog(mHandle, infoLogLength, &charsWritten, &infoLog[0]);
-		std::stringstream ss;
-		ss << msg << "\n" << infoLog;
-		LogError(ss.str());
-	}
+ShaderStage::ShaderStage(OpenGL::ShaderStage stage, std::string const& filename): mStage(stage) {
+  // Load shader source.
+  std::ifstream ifs(filename);
+  if (!ifs.is_open()) {
+    Log::error("Could not open shader file: " + filename);
+    return;
+  }
+  std::string source;
+  while (!ifs.eof()) {
+    std::string line;
+    std::getline(ifs, line);
+    source += line + '\n';
+  }
+
+  // Compile shader.
+  mHandle = glCreateShader(mStage);
+  char const* str = source.c_str();
+  glShaderSource(mHandle, 1, &str, nullptr);
+  glCompileShader(mHandle);
+
+  // Check if compilation is successful.
+  GLint success = GL_TRUE;
+  glGetShaderiv(mHandle, GL_COMPILE_STATUS, &success);
+  if (success == GL_FALSE) {
+    GLint infoLogLength = 0, charsWritten = 0;
+    glGetShaderiv(mHandle, GL_INFO_LOG_LENGTH, &infoLogLength);
+    std::string infoLog(infoLogLength, ' ');
+    glGetShaderInfoLog(mHandle, infoLogLength, &charsWritten, infoLog.data());
+    Log::error("OpenGL shader stage compilation error: " + filename + ":\n" + infoLog);
+  }
 }
 
-void Shader::loadFromFile(GLenum type, const std::string& filename) {
-	mType = type;
-	std::string currLine, source;
-	std::vector<int> lengths;
-	std::ifstream sourceFile(filename);
-	if (!sourceFile.is_open()) {
-		std::stringstream ss;
-		ss << "Could not open shader file: " << filename;
-		LogError(ss.str());
-		return;
-	}
-	while (!sourceFile.eof()) {
-		std::getline(sourceFile, currLine);
-		source += currLine + '\n';
-	}
-	sourceFile.close();
-	mHandle = glCreateShader(type);
-	const char* p = source.c_str();
-	int size = source.size();
-	glShaderSource(mHandle, 1, &p, &size);
-	glCompileShader(mHandle);
-	checkCompilation("Shader compilation error: \"" + filename + "\"");
+ShaderStage::~ShaderStage() {
+  if (mHandle != OpenGL::null) glDeleteShader(mHandle);
+}
+
+ShaderProgram::ShaderProgram(std::initializer_list<ShaderStage> stages) {
+  // Link shader stages.
+  mHandle = glCreateProgram();
+  for (auto const& stage: stages) glAttachShader(mHandle, stage.handle());
+  glLinkProgram(mHandle);
+
+  // Check if linking is successful.
+  GLint success = GL_TRUE;
+  glGetProgramiv(mHandle, GL_LINK_STATUS, &success);
+  if (success == GL_FALSE) {
+    GLint infoLogLength = 0, charsWritten = 0;
+    glGetProgramiv(mHandle, GL_INFO_LOG_LENGTH, &infoLogLength);
+    std::string infoLog(infoLogLength, ' ');
+    glGetProgramInfoLog(mHandle, infoLogLength, &charsWritten, infoLog.data());
+    Log::error("OpenGL shader program linking error:\n" + infoLog);
+  }
+
+  // Detach shader stages.
+  // See: https://www.khronos.org/opengl/wiki/Shader_Compilation
+  for (auto const& stage: stages) glDetachShader(mHandle, stage.handle());
 }
 
 ShaderProgram::~ShaderProgram() {
-	GLint count = 0;
-	glGetProgramiv(mHandle, GL_ATTACHED_SHADERS, &count);
-	std::unique_ptr<GLuint[]> names(new GLuint[count]);
-	glGetAttachedShaders(mHandle, count, nullptr, names.get());
-	for (int i = 0; i < count; i++) {
-		glDetachShader(mHandle, names[i]);
-		std::stringstream ss;
-		ss << "Detached shader " << names[i];
-		LogInfo(ss.str());
-	}
-	glDeleteProgram(mHandle);
+  if (mHandle != OpenGL::null) glDeleteProgram(mHandle);
 }
 
-void ShaderProgram::loadShadersFromFile(const std::string& vertex, const std::string& fragment) {
-	Shader vsh, fsh;
-	vsh.loadFromFile(GL_VERTEX_SHADER, vertex);
-	fsh.loadFromFile(GL_FRAGMENT_SHADER, fragment);
-	if (vsh.type() != GL_VERTEX_SHADER || fsh.type() != GL_FRAGMENT_SHADER) {
-		LogError("Shader type mismatch!");
-		std::terminate();
-	}
-	mHandle = glCreateProgram();
-	glAttachShader(mHandle, vsh.handle());
-	glAttachShader(mHandle, fsh.handle());
-	glLinkProgram(mHandle);
-	checkLinking("Shader program linking error:");
+OpenGL::UniformLocation ShaderProgram::uniformLocation(std::string const& name) {
+  auto loc = glGetUniformLocation(mHandle, name.c_str());
+  if (loc == -1) Log::verbose("Specifying unused uniform variable: " + name);
+  return loc;
 }
-
-void ShaderProgram::checkLinking(const std::string& msg) {
-	int st = GL_TRUE;
-	glGetProgramiv(mHandle, GL_LINK_STATUS, &st);
-	if (st == GL_FALSE) {
-		int infoLogLength = 0, charsWritten;
-		glGetProgramiv(mHandle, GL_INFO_LOG_LENGTH, &infoLogLength);
-		std::string infoLog(infoLogLength, ' ');
-		glGetProgramInfoLog(mHandle, infoLogLength, &charsWritten, &infoLog[0]);
-		std::stringstream ss;
-		ss << msg << "\n" << infoLog;
-		LogError(ss.str());
-	}
-}
-
-void ShaderProgram::setUniform1f(const std::string& uniform, float v0) {
-	int loc = getUniformLocation(uniform);
-	if (loc == -1) {
-//		LogVerbose("Shader uniform variable not found: " + uniform);
-		return;
-	}
-	glUniform1f(loc, v0);
-}
-
-void ShaderProgram::setUniform2f(const std::string& uniform, float v0, float v1) {
-	int loc = getUniformLocation(uniform);
-	if (loc == -1) {
-//		LogVerbose("Shader uniform variable not found: " + uniform);
-		return;
-	}
-	glUniform2f(loc, v0, v1);
-}
-
-void ShaderProgram::setUniform3f(const std::string& uniform, float v0, float v1, float v2) {
-	int loc = getUniformLocation(uniform);
-	if (loc == -1) {
-//		LogVerbose("Shader uniform variable not found: " + uniform);
-		return;
-	}
-	glUniform3f(loc, v0, v1, v2);
-}
-
-void ShaderProgram::setUniform4f(const std::string& uniform, float v0, float v1, float v2, float v3) {
-	int loc = getUniformLocation(uniform);
-	if (loc == -1) {
-//		LogVerbose("Shader uniform variable not found: " + uniform);
-		return;
-	}
-	glUniform4f(loc, v0, v1, v2, v3);
-}
-
-void ShaderProgram::setUniform1i(const std::string& uniform, int v0) {
-	int loc = getUniformLocation(uniform);
-	if (loc == -1) {
-//		LogVerbose("Shader uniform variable not found: " + uniform);
-		return;
-	}
-	glUniform1i(loc, v0);
-}
-
-void ShaderProgram::setUniform1ui(const std::string& uniform, unsigned int v0) {
-	int loc = getUniformLocation(uniform);
-	if (loc == -1) {
-//		LogVerbose("Shader uniform variable not found: " + uniform);
-		return;
-	}
-	glUniform1ui(loc, v0);
-}
-
-void ShaderProgram::setUniformMatrix4fv(const std::string& uniform, float* v0) {
-	int loc = getUniformLocation(uniform);
-	if (loc == -1) {
-//		LogVerbose("Shader uniform variable not found: " + uniform);
-		return;
-	}
-	glUniformMatrix4fv(loc, 1, GL_FALSE, v0);
-}
-

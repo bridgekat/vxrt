@@ -1,175 +1,145 @@
 #ifndef VERTEXARRAY_H_
 #define VERTEXARRAY_H_
 
-#include <cstring>
-#include <initializer_list>
 #include <algorithm>
+#include <cassert>
+#include <concepts>
+#include <initializer_list>
+#include <utility>
+#include <vector>
 #include "common.h"
 #include "opengl.h"
-#include "debug.h"
 
-class VertexFormat {
+// Common vertex layouts (coords, texture coords, colors, normals).
+class VertexLayout {
 public:
-	// Vertex attribute count
-	unsigned int textureCount, colorCount, normalCount, coordinateCount;
-	// Vertex attributes count (sum of all)
-	int vertexAttributeCount;
+  // Generic attribute indices (for binding in shaders).
+  static constexpr size_t coordsAttribIndex = 0;
+  static constexpr size_t texCoordsAttribIndex = 1;
+  static constexpr size_t colorsAttribIndex = 2;
+  static constexpr size_t normalsAttribIndex = 3;
 
-	VertexFormat(): textureCount(0), colorCount(0), normalCount(0), coordinateCount(0), vertexAttributeCount(0) {}
+  OpenGL::Primitive primitive;
+  size_t numCoords;
+  size_t numTexCoords;
+  size_t numColors;
+  size_t numNormals;
 
-	VertexFormat(unsigned int textureElementCount, unsigned int colorElementCount, unsigned int normalElementCount, unsigned int coordinateElementCount):
-		textureCount(textureElementCount), colorCount(colorElementCount), normalCount(normalElementCount), coordinateCount(coordinateElementCount),
-		vertexAttributeCount(textureElementCount + colorElementCount + normalElementCount + coordinateElementCount) {
-		Assert(textureCount <= 3);
-		Assert(colorCount <= 4);
-		Assert(normalCount == 0 || normalCount == 3);
-		Assert(coordinateCount <= 4 && coordinateCount >= 1);
-	}
+  VertexLayout(
+    OpenGL::Primitive primitive,
+    size_t numCoords,
+    size_t numTexCoords = 0,
+    size_t numColors = 0,
+    size_t numNormals = 0
+  ):
+    primitive(primitive),
+    numCoords(numCoords),
+    numTexCoords(numTexCoords),
+    numColors(numColors),
+    numNormals(numNormals) {}
+
+  size_t total() const { return numTexCoords + numColors + numNormals + numCoords; }
 };
 
+static_assert(std::copy_constructible<VertexLayout>);
+static_assert(std::assignable_from<VertexLayout&, VertexLayout&>);
+
+// A vertex array stores vertices on the CPU.
+// Also stores the most-recently specified vertex attributes for convenience of use
+// (simulates the old-style `glBegin`.)
 class VertexArray {
 public:
-	VertexArray(unsigned int maxVertexes, const VertexFormat& format):
-		mMaxVertexes(maxVertexes), mVertexes(0), mFormat(format),
-		mData(new float[mMaxVertexes * format.vertexAttributeCount]),
-		mVertexAttributes(new float[format.vertexAttributeCount]) {}
+  explicit VertexArray(VertexLayout const& layout): mLayout(layout) { mAttributes.resize(mLayout.total()); }
 
-	~VertexArray() {
-		delete[] mData;
-		delete[] mVertexAttributes;
-	}
+  VertexLayout const& layout() const { return mLayout; }
+  size_t size() const { return mData.size(); }
+  float const* data() const { return mData.data(); }
 
-	VertexArray(const VertexArray&) = delete;
-	VertexArray& operator=(const VertexArray&) = delete;
+  VertexArray& texCoords(size_t length, float const* data) {
+    assert(length == mLayout.numTexCoords);
+    std::copy(data, data + length, mAttributes.data());
+    return *this;
+  }
 
-	void clear() {
-		memset(mData, 0, mMaxVertexes * mFormat.vertexAttributeCount * sizeof(float));
-		memset(mVertexAttributes, 0, mFormat.vertexAttributeCount * sizeof(float));
-		mVertexes = 0;
-	}
+  VertexArray& color(size_t length, const float* data) {
+    assert(length == mLayout.numColors);
+    std::copy(data, data + length, mAttributes.data() + mLayout.numTexCoords);
+    return *this;
+  }
 
-	// Set texture coordinates
-	void setTexture(size_t size, const float* texture) {
-		Assert(size <= mFormat.textureCount);
-		memcpy(mVertexAttributes, texture, size * sizeof(float));
-	}
+  VertexArray& normal(size_t length, const float* data) {
+    assert(length == mLayout.numNormals);
+    std::copy(data, data + length, mAttributes.data() + mLayout.numTexCoords + mLayout.numColors);
+    return *this;
+  }
 
-	void setTexture(std::initializer_list<float> texture) {
-		setTexture(texture.size(), texture.begin());
-	}
+  VertexArray& vertex(size_t length, const float* data) {
+    assert(length == mLayout.numCoords);
+    std::copy(data, data + length, mAttributes.data() + mLayout.numTexCoords + mLayout.numColors + mLayout.numNormals);
+    mData.insert(mData.end(), mAttributes.begin(), mAttributes.end());
+    return *this;
+  }
 
-	// Set color value
-	void setColor(size_t size, const float* color) {
-		Assert(size <= mFormat.colorCount);
-		memcpy(mVertexAttributes + mFormat.textureCount, color, size * sizeof(float));
-	}
+  VertexArray& vertices(size_t length, const float* data) {
+    assert(length % mLayout.total() == 0);
+    mData.insert(mData.end(), data, data + length);
+    return *this;
+  }
 
-	void setColor(std::initializer_list<float> color) {
-		setColor(color.size(), color.begin());
-	}
-
-	// Set normal vector
-	void setNormal(size_t size, const float* normal) {
-		Assert(size <= mFormat.normalCount);
-		memcpy(mVertexAttributes + mFormat.textureCount + mFormat.colorCount, normal, size * sizeof(float));
-	}
-
-	void setNormal(std::initializer_list<float> normal) {
-		setNormal(normal.size(), normal.begin());
-	}
-
-	// Add vertex
-	void addVertex(const float* coords) {
-		auto cnt = mFormat.textureCount + mFormat.colorCount + mFormat.normalCount;
-		Assert(mVertexes * mFormat.vertexAttributeCount + cnt + mFormat.coordinateCount <= mMaxVertexes * mFormat.vertexAttributeCount);
-		memcpy(mData + mVertexes * mFormat.vertexAttributeCount, mVertexAttributes, cnt * sizeof(float));
-		memcpy(mData + mVertexes * mFormat.vertexAttributeCount + cnt, coords, mFormat.coordinateCount * sizeof(float));
-		mVertexes++;
-	}
-
-	void addVertex(std::initializer_list<float> coords) {
-		addVertex(coords.begin());
-	}
-
-	void addPrimitive(unsigned int size, std::initializer_list<float> d) {
-		memcpy(mData + mVertexes * mFormat.vertexAttributeCount, d.begin(), size * mFormat.vertexAttributeCount * sizeof(float));
-		mVertexes += size;
-	}
-
-	// Get current vertex format
-	const VertexFormat& format() const { return mFormat; }
-	// Get current vertex data
-	const float* data() const { return mData; }
-	// Get current vertex count
-	int vertexCount() const { return mVertexes; }
+  VertexArray& texCoords(std::initializer_list<float> values) { return texCoords(values.size(), values.begin()); }
+  VertexArray& color(std::initializer_list<float> values) { return color(values.size(), values.begin()); }
+  VertexArray& normal(std::initializer_list<float> values) { return normal(values.size(), values.begin()); }
+  VertexArray& vertex(std::initializer_list<float> values) { return vertex(values.size(), values.begin()); }
+  VertexArray& vertices(std::initializer_list<float> values) { return vertices(values.size(), values.begin()); }
 
 private:
-	// Max vertex count
-	const unsigned int mMaxVertexes;
-	// Vertex count
-	int mVertexes;
-	// Vertex array format
-	VertexFormat mFormat;
-	// Vertex array
-	float* mData;
-	// Current vertex attributes
-	float* mVertexAttributes;
+  VertexLayout mLayout;
+  std::vector<float> mData;
+  std::vector<float> mAttributes;
 };
 
+static_assert(std::move_constructible<VertexArray>);
+static_assert(std::assignable_from<VertexArray&, VertexArray&&>);
+static_assert(std::copy_constructible<VertexArray>);
+static_assert(std::assignable_from<VertexArray&, VertexArray&>);
+
+// A vertex buffer stores vertices on the GPU. Can be constructed from vertex arrays.
+// Partial uploading and (persistent) mapping of buffers are not implemented yet.
 class VertexBuffer {
 public:
-	VertexBuffer(): id(0), vao(0), vertexes(0) {}
-	VertexBuffer(VertexBuffer&& r): id(0), vao(0), vertexes(0) { swap(r); }
-	/*VertexBuffer(VertexBufferID id_, int vertexes_, const VertexFormat& format_):
-		id(id_), vertexes(vertexes_), format(format_) {}*/
-	explicit VertexBuffer(const VertexArray& va, bool staticDraw = true);
-	~VertexBuffer() { destroy(); }
+  explicit VertexBuffer(VertexArray const& va, bool willReuse = false);
 
-	VertexBuffer& operator=(VertexBuffer&& r) {
-		swap(r);
-		return *this;
-	}
+  VertexBuffer(VertexBuffer&& r):
+    mLayout(r.mLayout),
+    mNumVertices(r.mNumVertices),
+    mVAO(std::exchange(r.mVAO, OpenGL::null)),
+    mVBO(std::exchange(r.mVBO, OpenGL::null)) {}
 
-	// Is empty
-	bool empty() const {
-		if (id == 0) {
-			Assert(vertexes == 0);
-			return true;
-		}
-		return false;
-	}
-	// Upload new data
-	void update(const VertexArray& va, bool staticDraw = true);
-	// Swap
-	void swap(VertexBuffer& r) {
-		std::swap(id, r.id);
-		std::swap(vao, r.vao);
-		std::swap(vertexes, r.vertexes);
-		std::swap(format, r.format);
-	}
-	// Render vertex buffer
-	void render() const;
-	// Destroy vertex buffer
-	void destroy() {
-		format = VertexFormat();
-		if (empty()) return;
-		if (!OpenGL::coreProfile()) {
-			glDeleteBuffersARB(1, &id);
-		} else {
-			glDeleteVertexArrays(1, &vao);
-			glDeleteBuffers(1, &id);
-		}
-		vertexes = id = vao = 0;
-	}
+  VertexBuffer& operator=(VertexBuffer&& r) noexcept {
+    swap(*this, r);
+    return *this;
+  }
+
+  ~VertexBuffer();
+
+  friend void swap(VertexBuffer& l, VertexBuffer& r) noexcept {
+    using std::swap;
+    swap(l.mLayout, r.mLayout);
+    swap(l.mNumVertices, r.mNumVertices);
+    swap(l.mVAO, r.mVAO);
+    swap(l.mVBO, r.mVBO);
+  }
+
+  void draw() const;
 
 private:
-	// Buffer ID
-	VertexBufferID id, vao;
-	// Vertex count
-	int vertexes;
-	// Buffer format
-	VertexFormat format;
+  VertexLayout mLayout;
+  size_t mNumVertices;
+  OpenGL::Object mVAO = OpenGL::null;
+  OpenGL::Object mVBO = OpenGL::null;
 };
 
-#endif // !VERTEXARRAY_H_
+static_assert(std::move_constructible<VertexBuffer>);
+static_assert(std::assignable_from<VertexBuffer&, VertexBuffer&&>);
 
+#endif // VERTEXARRAY_H_

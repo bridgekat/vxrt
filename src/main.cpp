@@ -13,28 +13,30 @@
 #include "window.h"
 
 double const gamma = 2.2;
-size_t const prevFrameTextureIndex = 0, noiseTextureIndex = 1, maxTextureIndex = 2;
+size_t const prevFrameTextureIndex = 0, noiseTextureIndex = 1, maxTextureIndex = 2, minTextureIndex = 3,
+             beamTextureIndex = 4;
 size_t const outImageIndex = 0;
 
-std::array<std::optional<FrameBuffer>, 2> fbo; // late
 size_t patchWidth, patchHeight;
-size_t fbWidthDefault = 0, fbHeightDefault = 0;
+size_t renderWidth = 0, renderHeight = 0;
 
-void enablePathTracing(Window& window) {
-  size_t width, height;
-  if (fbWidthDefault <= 0 || fbHeightDefault <= 0) {
-    width = window.width();
-    height = window.height();
-  } else {
-    width = fbWidthDefault;
-    height = fbHeightDefault;
+void enablePathTracing(Window& window, std::array<FrameBuffer, 3>& fbo) {
+  if (renderWidth > 0 && renderHeight > 0) {
+    fbo[0] = FrameBuffer(renderWidth, renderHeight, 1, false);
+    fbo[1] = FrameBuffer(renderWidth, renderHeight, 1, false);
+    fbo[2] = FrameBuffer(renderWidth, renderHeight, 1, false);
   }
-  fbo[0] = FrameBuffer(width, height, 1, false);
-  fbo[1] = FrameBuffer(width, height, 1, false);
   window.setMouseLocked(false);
 }
 
-void disablePathTracing(Window& window) { window.setMouseLocked(true); }
+void disablePathTracing(Window& window, std::array<FrameBuffer, 3>& fbo) {
+  if (renderWidth > 0 && renderHeight > 0) {
+    fbo[0] = FrameBuffer(window.width(), window.height(), 1, false);
+    fbo[1] = FrameBuffer(window.width(), window.height(), 1, false);
+    fbo[2] = FrameBuffer(window.width(), window.height(), 1, false);
+  }
+  window.setMouseLocked(true);
+}
 
 OpenGL::Object loadNoiseMipmaps(Bitmap const& image, bool maximal) {
   size_t size = image.width();
@@ -45,10 +47,9 @@ OpenGL::Object loadNoiseMipmaps(Bitmap const& image, bool maximal) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(levels));
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 0);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, levels);
-  glTexEnvf(GL_TEXTURE_FILTER_CONTROL, GL_TEXTURE_LOD_BIAS, 0.0f);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, static_cast<GLint>(levels));
   for (size_t level = 0, scale = 1; level <= levels; level++, scale *= 2) {
     assert(scale <= size);
     Bitmap curr(size / scale, size / scale, image.bytesPerPixel());
@@ -98,9 +99,9 @@ int main() {
   Log::info(ss.str());
 
   patchWidth = config.getOr("PathTracing.PatchWidth", 8);
-  patchHeight = config.getOr("PathTracing.PatchHeight", 4);
-  fbWidthDefault = config.getOr("PathTracing.DefaultRenderWidth", 0);
-  fbHeightDefault = config.getOr("PathTracing.DefaultRenderHeight", 0);
+  patchHeight = config.getOr("PathTracing.PatchHeight", 8);
+  renderWidth = config.getOr("PathTracing.RenderWidth", 0);
+  renderHeight = config.getOr("PathTracing.RenderHeight", 0);
 
   ShaderProgram basicShader({
     ShaderStage(OpenGL::vertexShader, std::string(ShaderPath) + "Basic.vsh"),
@@ -147,6 +148,7 @@ int main() {
 
   // Init noise bounds.
   Bitmap maxImage(noiseSize, noiseSize, 4);
+  Bitmap minImage(noiseSize, noiseSize, 4);
   for (size_t x = 0; x < noiseSize; x++)
     for (size_t y = 0; y < noiseSize; y++) {
       size_t x1 = (x + 1) % noiseSize, y1 = (y + 1) % noiseSize;
@@ -156,8 +158,22 @@ int main() {
         noiseImage.at(x, y1, 0),
         noiseImage.at(x1, y1, 0),
       });
+      minImage.at(x, y, 0) = std::min({
+        noiseImage.at(x, y, 0),
+        noiseImage.at(x1, y, 0),
+        noiseImage.at(x, y1, 0),
+        noiseImage.at(x1, y1, 0),
+      });
     }
   Texture maxTexture = loadNoiseMipmaps(maxImage, true);
+  Texture minTexture = loadNoiseMipmaps(minImage, false);
+
+  // Init framebuffers.
+  std::array<FrameBuffer, 3> fbo = {
+    FrameBuffer(window.width(), window.height(), 1, false),
+    FrameBuffer(window.width(), window.height(), 1, false),
+    FrameBuffer(window.width(), window.height(), 1, false),
+  };
 
   Camera camera;
   window.setMouseLocked(true);
@@ -172,64 +188,89 @@ int main() {
     window.swapBuffers();
     gl.checkError();
 
-    // Init rendering
-    size_t curr = frameCounter & 1;
+    // Swap and resize framebuffers.
     if (pathTracing) {
-      fbo[curr ^ 1].value().bindColorTexturesAt(prevFrameTextureIndex);
+      std::swap(fbo[0], fbo[1]);
+      fbo[1].bindColorTextureAt(0, prevFrameTextureIndex);
     } else {
-      size_t width = window.width(), height = window.height();
-      if (!fbo[curr].has_value() || fbo[curr]->width() != width || fbo[curr]->height() != height) {
-        fbo[curr] = FrameBuffer(width, height, 1, false);
+      auto const width = window.width(), height = window.height();
+      if (fbo[0].width() != width || fbo[0].height() != height) {
+        fbo[0] = FrameBuffer(width, height, 1, false);
+        fbo[1] = FrameBuffer(width, height, 1, false);
+        fbo[2] = FrameBuffer(width, height, 1, false);
       }
     }
+    auto const width = fbo[0].width(), height = fbo[0].height();
 
     // Init shaders.
     noiseTexture.bindAt(noiseTextureIndex);
     maxTexture.bindAt(maxTextureIndex);
+    minTexture.bindAt(minTextureIndex);
     mainShader.use();
-    // auto proj = camera.getProjectionMatrix();
-    // mainShader.uniformMat4("ProjectionMatrix", proj.data());
-    // auto modl = camera.getModelViewMatrix();
-    // mainShader.uniformMat4("ModelViewMatrix", modl.data());
-    auto invProj = camera.getProjectionMatrix().inverted();
-    mainShader.uniformMat4("ProjectionInverse", invProj.data());
-    auto invModl = camera.getModelViewMatrix().inverted();
-    mainShader.uniformMat4("ModelViewInverse", invModl.data());
+    // See: https://en.cppreference.com/w/cpp/language/lifetime
+    // mainShader.uniformMat4("ProjectionMatrix", camera.getProjectionMatrix().data());
+    // mainShader.uniformMat4("ModelViewMatrix", camera.getModelViewMatrix().data());
+    mainShader.uniformMat4("ProjectionInverse", camera.getProjectionMatrix().inverted().data());
+    mainShader.uniformMat4("ModelViewInverse", camera.getModelViewMatrix().inverted().data());
     mainShader.uniformVec3("CameraPosition", camera.position().x, camera.position().y, camera.position().z);
     mainShader.uniformFloat("RandomSeed", static_cast<float>(UpdateScheduler::timeFromEpoch() - startTime));
     mainShader.uniformBool("PathTracing", pathTracing);
     mainShader.uniformBool("ProfilerOn", Window::isKeyPressed(SDL_SCANCODE_M));
     // mainShader.uniformFloat("Time", static_cast<float>(UpdateScheduler::timeFromEpoch() - startTime));
-
     mainShader.uniformSampler("PrevFrame", prevFrameTextureIndex);
     mainShader.uniformSampler("NoiseTexture", noiseTextureIndex);
     mainShader.uniformSampler("MaxTexture", maxTextureIndex);
+    mainShader.uniformSampler("MinTexture", minTextureIndex);
+    mainShader.uniformSampler("BeamTexture", beamTextureIndex);
     mainShader.uniformUInt("SampleCount", frameCounter);
-    mainShader.uniformUInt("FrameWidth", fbo[curr]->width());
-    mainShader.uniformUInt("FrameHeight", fbo[curr]->height());
+    mainShader.uniformUInt("FrameWidth", width);
+    mainShader.uniformUInt("FrameHeight", height);
     mainShader.uniformBool("DynamicMode", dynamicMode);
     mainShader.uniformUInt("MaxNodes", maxNodes);
     mainShader.uniformUInt("MaxLevels", worldLevels);
     mainShader.uniformUInt("NoiseLevels", noiseLevels);
     mainShader.uniformUInt("PartialLevels", partialLevels);
-
-    // Render scene (sample once for each pixel)
     mainShader.uniformImage("FrameBuffer", outImageIndex);
-    glBindImageTexture(outImageIndex, fbo[curr]->colorTextures().at(0), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glDispatchCompute((fbo[curr]->width() - 1) / patchWidth + 1, (fbo[curr]->height() - 1) / patchHeight + 1, 1);
-    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
 
-    // Present to screen.
-    fbo[curr]->bindColorTexturesAt(prevFrameTextureIndex);
+    // Coarse passes (beam optimization.)
+    // size_t beamSize = std::max(patchWidth, patchHeight);
+    mainShader.uniformBool("BeamMode", true);
+    mainShader.uniformUInt("PrevBeamSize", 0); // Initialize.
+    size_t beamSize = 64;                      // TODO?
+    while (beamSize >= 4) {
+      auto const btexWidth = width / beamSize + 1, btexHeight = height / beamSize + 1;
+      mainShader.uniformUInt("CurrBeamSize", beamSize);
+      fbo[2].bindColorTextureAt(0, beamTextureIndex);
+      glBindImageTexture(outImageIndex, fbo[0].colorTextures().at(0), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+      glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+      glDispatchCompute((btexWidth - 1) / patchWidth + 1, (btexHeight - 1) / patchHeight + 1, 1);
+      mainShader.uniformUInt("PrevBeamSize", beamSize);
+      beamSize /= 4;
+      swap(fbo[0], fbo[2]);
+    }
+
+    // Render scene (sample once for each pixel.)
+    mainShader.uniformBool("BeamMode", false);
+    mainShader.uniformUInt("CurrBeamSize", 1);
+    fbo[2].bindColorTextureAt(0, beamTextureIndex);
+    glBindImageTexture(outImageIndex, fbo[0].colorTextures().at(0), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    glDispatchCompute((width - 1) / patchWidth + 1, (height - 1) / patchHeight + 1, 1);
+
     gl.setDrawArea(0, 0, window.width(), window.height());
     gl.clear();
+
+    // Present to screen.
     basicShader.use();
     basicShader.uniformSampler("Texture2D", prevFrameTextureIndex);
     basicShader.uniformBool("Texture2DEnabled", true);
     basicShader.uniformBool("ColorEnabled", false);
     basicShader.uniformBool("GammaCorrection", true);
-    float wfrac = static_cast<float>(fbo[curr]->width()) / static_cast<float>(fbo[curr]->size());
-    float hfrac = static_cast<float>(fbo[curr]->height()) / static_cast<float>(fbo[curr]->size());
+    fbo[0].bindColorTextureAt(0, prevFrameTextureIndex);
+    // See: https://www.khronos.org/opengl/wiki/Memory_Model#External_visibility
+    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+    auto wfrac = static_cast<float>(width) / static_cast<float>(fbo[0].size());
+    auto hfrac = static_cast<float>(height) / static_cast<float>(fbo[0].size());
     VertexBuffer(VertexArray(VertexLayout(OpenGL::triangleStrip, 2, 2))
                    .texCoords({0.0f, hfrac})
                    .vertex({-1.0f, 1.0f})
@@ -275,10 +316,10 @@ int main() {
       if (!opressed) {
         if (pathTracing) {
           // Read data.
-          fbo[curr]->bindBufferRead(0);
-          Bitmap bmp(fbo[curr]->width(), fbo[curr]->height(), 3);
-          glReadPixels(0, 0, fbo[curr]->width(), fbo[curr]->height(), GL_RGB, GL_UNSIGNED_BYTE, bmp.data());
-          fbo[curr]->unbindRead();
+          Bitmap bmp(width, height, 3);
+          fbo[0].bindBufferForRead(0);
+          glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, bmp.data());
+          fbo[0].unbindBuffers();
           // gamma correction.
           for (size_t i = 0; i < bmp.height(); i++)
             for (size_t j = 0; j < bmp.width(); j++) {
@@ -290,7 +331,7 @@ int main() {
             }
           // Save file.
           std::stringstream ss;
-          ss << ScreenshotPath << fbo[curr]->width() << "x" << fbo[curr]->height() << "-" << frameCounter << "spp-"
+          ss << ScreenshotPath << width << "x" << height << "-" << frameCounter << "spp-"
              << UpdateScheduler::timeFromEpoch() - startTime << "s.bmp";
           bmp.swapChannels(0, 2);
           bmp.save(ss.str());
@@ -321,8 +362,8 @@ int main() {
     if (Window::isKeyPressed(SDL_SCANCODE_P)) {
       if (!ppressed) {
         pathTracing = !pathTracing;
-        if (pathTracing) enablePathTracing(window);
-        else disablePathTracing(window);
+        if (pathTracing) enablePathTracing(window, fbo);
+        else disablePathTracing(window, fbo);
         frameCounter = 0;
       }
       ppressed = true;
@@ -356,7 +397,8 @@ int main() {
     }
 
     // Camera parameters.
-    camera.setPerspective(70.0f, float(fbo[curr]->width()) / float(fbo[curr]->height()), 0.1f, 256.0f);
+    auto aspect = static_cast<float>(width) / static_cast<float>(height);
+    camera.setPerspective(70.0f, aspect, 0.1f, 256.0f);
     if (!pathTracing) camera.update(window);
 
     if (Window::isKeyPressed(SDL_SCANCODE_ESCAPE)) break;

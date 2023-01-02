@@ -2,7 +2,7 @@
 
 // ===== Inputs =====
 
-layout (local_size_x = 8u, local_size_y = 4u, local_size_z = 1u)
+layout (local_size_x = 8u, local_size_y = 8u, local_size_z = 1u)
 in;
 
 // uniform mat4 ProjectionMatrix;
@@ -11,6 +11,7 @@ uniform mat4 ProjectionInverse;
 uniform mat4 ModelViewInverse;
 uniform vec3 CameraPosition;
 uniform float RandomSeed;
+uniform bool BeamMode;
 uniform bool PathTracing;
 uniform bool ProfilerOn;
 // uniform float Time;
@@ -18,16 +19,20 @@ uniform bool ProfilerOn;
 uniform sampler2D PrevFrame;
 uniform sampler2D NoiseTexture;
 uniform sampler2D MaxTexture;
+uniform sampler2D MinTexture;
+uniform sampler2D BeamTexture;
+uniform uint PrevBeamSize;
+uniform uint CurrBeamSize;
 uniform uint SampleCount;
 uniform uint FrameWidth;
 uniform uint FrameHeight;
 uniform bool DynamicMode;
 uniform uint MaxNodes;
 uniform uint MaxLevels;
-uniform uint NoiseLevels; // Noise map detail level <= MaxLevels
-uniform uint PartialLevels; // Min noise level (using part of the noise map)
+uniform uint NoiseLevels; // Noise map detail level `<= MaxLevels`.
+uniform uint PartialLevels; // Min noise level (using part of the noise map.)
 
-layout (std430, binding = 1)
+layout (std430, binding = 1) restrict
 buffer TreeData {
   uint NodeCount;
   uint Data[];
@@ -35,9 +40,10 @@ buffer TreeData {
 
 // ===== Outputs =====
 
-uniform restrict writeonly image2D FrameBuffer;
+restrict writeonly
+uniform image2D FrameBuffer;
 
-layout (std430, binding = 2)
+layout (std430, binding = 2) restrict writeonly
 buffer OutputData {
   uint OutputCount;
 };
@@ -72,11 +78,8 @@ float HeightScale;
 const uint MaxIterations = 128u;
 
 // Level of details.
-#define LOD_CHECK
-#define LOD_CHECK_ALWAYS
-const float FoVy = 70.0;
-const float VerticalResolution = 480.0; // 2160.0;
-const float LODQuality = 1.0;
+const float LodFov = 70.0 / 180.0 * Pi;
+const float LodQuality = 1.0; // 1.0 = default quality (side length > 1px.)
 vec3 LodCenterPos;
 vec3 LodViewDir;
 
@@ -173,7 +176,7 @@ float halton(uint i, uint b) {
 
 // ===== Main part =====
 
-// Allocates new slot.
+// Allocates new slots.
 uint allocate(uint count) {
   uint res = atomicAdd(NodeCount, count);
   if (res + count > uint(MaxNodes)) return 0u;
@@ -181,7 +184,11 @@ uint allocate(uint count) {
   return res;
 }
 
-// Least significant 2bits: [00] not generated; [01] intermediate; [11] leaf
+// Special states.
+#define IS_INVALID(data) (data == 0u)
+#define IS_LOCKED(data) (data == 1u)
+
+// Least significant 2bits: [01] intermediate; [11] leaf.
 #define IS_LEAF(data) ((data & 3u) == 3u)
 #define CHILD_PTR(data) (data >> 2u)
 #define LEAF_DATA(data) (data >> 2u)
@@ -190,15 +197,18 @@ uint allocate(uint count) {
 
 // Level 0 is the least detailed level (one pixel).
 #ifdef FRACTALNOISE_USE_TEXTURESAMPLER
-float maxNoise2DSubpixel(uint level, uvec2 x) {
+float noise2DSubpixel(uint level, uvec2 x, bool maximum) {
   float size = 1.0 / float(1u << level);
   vec2 pos = vec2(x) * size;
 #define F(x, y) (textureLod(NoiseTexture, pos + vec2(x, y) + vec2(0.5) / NoiseTextureSize, 0.0).r)
-  return max(max(F(0, 0), F(size, 0)), max(F(0, size), F(size, size)));
+  vec4 res = vec4(F(0, 0), F(size, 0), F(0, size), F(size, size));
+  return maximum ?
+    max(max(res[0], res[1]), max(res[2], res[3])) :
+    min(min(res[0], res[1]), min(res[2], res[3]));
 #undef F
 }
 #else
-float maxNoise2DSubpixel(uint level, uvec2 x) {
+float noise2DSubpixel(uint level, uvec2 x, bool maximum) {
   float size = NoiseTextureSize / float(1u << level);
   vec2 pos = vec2(x) * size;
   ivec2 p = ivec2(pos);
@@ -217,13 +227,17 @@ float maxNoise2DSubpixel(uint level, uvec2 x) {
   fy = (vec4(1.0) - cos(Pi * fy)) / 2.0;
 #endif
   vec4 res = mat4((1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy) * tex;
-  return max(max(res[0], res[1]), max(res[2], res[3]));
+  return maximum ?
+    max(max(res[0], res[1]), max(res[2], res[3])) :
+    min(min(res[0], res[1]), min(res[2], res[3]));
 }
 #endif
 
-float maxNoise2D(uint level, uvec2 x) {
-  if (level > NoiseLevels) return maxNoise2DSubpixel(level, x);
-  return texelFetch(MaxTexture, ivec2(x), int(NoiseLevels - level)).r;
+float noise2D(uint level, uvec2 x, bool maximum) {
+  if (level > NoiseLevels) return noise2DSubpixel(level, x, maximum);
+  return maximum ?
+    texelFetch(MaxTexture, ivec2(x), int(NoiseLevels - level)).r :
+    texelFetch(MinTexture, ivec2(x), int(NoiseLevels - level)).r;
 }
 
 /*
@@ -235,11 +249,11 @@ float Factor[16] = float[](
 );
 */
 
-float getMaxHeight(uint level, uvec2 pos) {
+float getHeight(uint level, uvec2 pos, bool maximum) {
   float res = 0.0, amplitude = pow(2.0, float(PartialLevels));
   level += PartialLevels;
   for (uint i = 0u; i + NoiseLevels <= MaxLevels + PartialLevels; i++) {
-    res += maxNoise2D(level, pos) * amplitude; // * Factor[i];
+    res += noise2D(level, pos, maximum) * amplitude; // * Factor[i];
     amplitude *= 0.5;
     if (level > 0u) {
       level--;
@@ -249,54 +263,51 @@ float getMaxHeight(uint level, uvec2 pos) {
   return res * HeightScale;
 }
 
+// Returns `true` if node is large enough. Modified in beam mode.
 bool lodCheck(uint level, uvec3 pos) {
-  vec3 rpos = (vec3(pos) + vec3(0.5)) * RootSize / float(1u << level) - LodCenterPos;
-  float size = sqrt(3.0) * RootSize / float(1u << level);
-  return tan(FoVy / 2.0 / 180.0 * Pi) * dot(rpos, LodViewDir) * 2.0 / VerticalResolution / LODQuality <= size;
+  vec3 rpos = (vec3(pos) + 0.5) * RootSize / float(1u << level) - LodCenterPos;
+  float size = RootSize / float(1u << level);
+  float real = tan(LodFov / 2.0) * dot(rpos, LodViewDir) * 2.0 / float(FrameHeight);
+  return BeamMode ?
+    size > real * CurrBeamSize :
+    size > real / LodQuality;
 }
 
-int generateNodeTerrain(uint level, uvec3 pos) {
-  if ((uint(getMaxHeight(level, pos.xz)) >> (MaxLevels - level)) < pos.y) return 0;
-  return (level < MaxLevels) ? -1 : 1;
-}
-
-// Returns the innermost tree node at a given position.
-Node getNodeAt(vec3 pos) {
-  Box box = Box(vec3(0.0), RootSize);
-  if (!inside(pos, box)) return Node(0u, 0u, box); // Outside
-  uint ptr = 0u, cdata = 0u;
-  for (uint level = 0u; level <= MaxLevels; level++) {
-#ifdef LOD_CHECK
-#ifdef LOD_CHECK_ALWAYS
-    if (!lodCheck(level, uvec3(pos) >> (MaxLevels - level))) return Node(MAKE_LEAF(1u), level, box);
-#endif
-#endif
-    cdata = Data[ptr];
-    if (DynamicMode && cdata == 0u) {
-#ifdef LOD_CHECK
-#ifndef LOD_CHECK_ALWAYS
-      if (!lodCheck(level, uvec3(pos) >> (MaxLevels - level))) return Node(MAKE_LEAF(1u), level, box);
-#endif
-#endif
-      if (atomicCompSwap(Data[ptr], 0u, 1u) == 0u) { // Not generated, generate node!
-        int curr = generateNodeTerrain(level, uvec3(pos) >> (MaxLevels - level));
-        cdata = curr < 0 ? MAKE_INTERMEDIATE(allocate(8u)) : MAKE_LEAF(uint(curr));
-        atomicExchange(Data[ptr], cdata);
-      } else { // Being generated by another invocation. Will be rendered next frame.
-        return Node(MAKE_LEAF(0u), level, box);
-      }
-    } else if (cdata == 1u) { // Being generated by another invocation. Will be rendered next frame.
-      return Node(MAKE_LEAF(0u), level, box);
-    }
-    if (IS_LEAF(cdata)) break; // Reached leaf (monotonous node)
-    ptr = CHILD_PTR(cdata);
-    vec3 mid = box.xyz + box.w / 2.0;
-    if (pos.x >= mid.x) { ptr += 1u; box.x = mid.x; }
-    if (pos.y >= mid.y) { ptr += 2u; box.y = mid.y; }
-    if (pos.z >= mid.z) { ptr += 4u; box.z = mid.z; }
-    box.w /= 2.0;
+bool generateNodeTerrain(uint level, uvec3 pos, out uint terr) {
+  uint maxHeight = uint(getHeight(level, pos.xz, true));
+  if (maxHeight <= (pos.y << (MaxLevels - level))) {
+    terr = 0u;
+    return true;
   }
-  return Node(cdata, MaxLevels, box);
+  uint minHeight = uint(getHeight(level, pos.xz, false));
+  if (minHeight >= ((pos.y + 1u) << (MaxLevels - level))) {
+    terr = 1u;
+    return true;
+  }
+  if (level >= MaxLevels) {
+    terr = 1u;
+    return true;
+  }
+  return false;
+}
+
+// Returns node at `ptr`, generating it if needed.
+// If node is being generated by another invocation, returns 1u.
+uint generateNode(uint ptr, uint level, uvec3 pos) {
+  uint cdata = Data[ptr];
+  if (DynamicMode) {
+    if (cdata == 0u) {
+      cdata = atomicCompSwap(Data[ptr], 0u, 1u);
+      if (cdata == 0u) {
+        uint terr;
+        bool isLeaf = generateNodeTerrain(level, pos, terr);
+        uint data = isLeaf ? MAKE_LEAF(terr) : MAKE_INTERMEDIATE(allocate(8u));
+        atomicExchange(Data[ptr], data);
+        return data;
+      }
+    }
+  }
+  return cdata;
 }
 
 // Intersects ray with box (assuming ray starts from inside).
@@ -321,11 +332,32 @@ Intersection outerIntersect(vec3 org, vec3 dir, Box box) {
   return Intersection(org + dir * tNear, mix(vec3(0.0), sign(dir), equal(tMin, vec3(tNear))));
 }
 
+// Returns the innermost tree node (either leaf or locked) at a given position.
+// Pre: `pos` must be inside the root box.
+Node getNodeAt(vec3 pos) {
+  Box box = Box(vec3(0.0), RootSize);
+  uint ptr = 0u;
+  for (uint level = 0u; level <= MaxLevels; level++) {
+    if (!lodCheck(level, uvec3(pos) >> (MaxLevels - level))) return Node(1u, level, box);
+    uint cdata = generateNode(ptr, level, uvec3(pos) >> (MaxLevels - level));
+    if (cdata == 1u) return Node(1u, level, box); // Locked.
+    // Check if reached leaf.
+    if (IS_LEAF(cdata)) return Node(cdata, level, box);
+    ptr = CHILD_PTR(cdata);
+    vec3 mid = box.xyz + box.w / 2.0;
+    if (pos.x >= mid.x) { ptr += 1u; box.x = mid.x; }
+    if (pos.y >= mid.y) { ptr += 2u; box.y = mid.y; }
+    if (pos.z >= mid.z) { ptr += 4u; box.z = mid.z; }
+    box.w /= 2.0;
+  }
+  return Node(1u, MaxLevels, box);
+}
+
 // Casts a ray through the octree.
 // Returns the number of iterations divided by `MaxIterations`.
 float castRay(inout vec3 testPoint, inout Intersection last, vec3 dir) {
   dir = normalize(dir);
-  Box box = Box(vec3(0.0), RootSize); // Root box
+  Box box = Box(vec3(0.0), RootSize); // Root box.
   // Ensure that ray starts inside the root box.
   if (!inside(last.pos, box)) {
     last = outerIntersect(last.pos, dir, box);
@@ -335,19 +367,84 @@ float castRay(inout vec3 testPoint, inout Intersection last, vec3 dir) {
   }
   // Start from `org` each time to avoid accumulation of errors.
   Intersection org = last;
-  for (int i = 0; i < MaxIterations; i++) {
+  for (uint i = 0u; i < MaxIterations; i++) {
     Node node = getNodeAt(testPoint);
-    if (node.data == 0u) return -1.0; // Out of range.
+    if (node.data == 1u) return float(i) / float(MaxIterations); // Locked.
     if (LEAF_DATA(node.data) != 0u) return float(i) / float(MaxIterations); // Opaque block.
     Intersection p = innerIntersect(org.pos, dir, node.box);
     // Update the test point.
     // Mid: `p.pos` lies on a box boundary, with normal = `p.offset`.
     testPoint = clamp(p.pos, node.box.xyz + 0.5, node.box.xyz + node.box.w - 0.5) + p.offset;
     last = p;
+    if (!inside(testPoint, box)) return -1.0; // Out of range.
   }
   // Too many iterations.
   return 1.0;
 }
+
+uint nodes[20];
+Box boxes[20];
+
+/*
+// Casts a ray through the octree [NEW METHOD: LAINE-KARRAS].
+// Returns the number of iterations divided by `MaxIterations`.
+float castRayLK(inout vec3 testPoint, inout Intersection last, vec3 dir) {
+  dir = normalize(dir);
+  Box box = Box(vec3(0.0), RootSize); // Root box.
+
+  // Ensure that ray starts inside the root box.
+  if (!inside(last.pos, box)) {
+    last = outerIntersect(last.pos, dir, box);
+    if (last.offset == vec3(0.0)) return -1.0; // Out of range.
+    // Update the test point.
+    testPoint = clamp(last.pos, box.xyz + 0.5, box.xyz + box.w - 0.5);
+  }
+
+  uint node = generateNode(0u, 0u, uvec3(0u)); // Root node data.
+  if (node == 1u) return 0.0; // Locked.
+
+  // Set up stack.
+  uint level = 0u;
+  nodes[level] = node;
+  boxes[level] = box;
+
+  // Start from `org` each time to avoid accumulation of errors.
+  Intersection org = last;
+  for (uint i = 0u; i < MaxIterations; i++) {
+    while (!IS_LEAF(node)) {
+      level++;
+      uint ptr = CHILD_PTR(node);
+      vec3 mid = box.xyz + box.w / 2.0;
+      if (testPoint.x >= mid.x) { ptr += 1u; box.x = mid.x; }
+      if (testPoint.y >= mid.y) { ptr += 2u; box.y = mid.y; }
+      if (testPoint.z >= mid.z) { ptr += 4u; box.z = mid.z; }
+      box.w /= 2.0;
+      if (!lodCheck(level, uvec3(testPoint) >> (MaxLevels - level))) node = 1u;
+      else node = generateNode(ptr, level, uvec3(testPoint) >> (MaxLevels - level));
+      if (node == 1u) return float(i) / float(MaxIterations); // Locked.
+      nodes[level] = node;
+      boxes[level] = box;
+    }
+
+    if (LEAF_DATA(node) != 0u) return float(i) / float(MaxIterations); // Opaque block.
+    Intersection p = innerIntersect(org.pos, dir, box);
+    // Update the test point.
+    // Mid: `p.pos` lies on a box boundary, with normal = `p.offset`.
+    testPoint = clamp(p.pos, box.xyz + 0.5, box.xyz + box.w - 0.5) + p.offset;
+    last = p;
+
+    while (!inside(testPoint, box)) {
+      if (level == 0) return -1.0; // Out of range.
+      level--;
+      node = nodes[level];
+      box = boxes[level];
+    }
+  }
+
+  // Too many iterations.
+  return 1.0;
+}
+*/
 
 // Use terrain-gradient-based normal for dynamic mode (experimental).
 vec3 getNormal(vec3 testPoint, Intersection last) {
@@ -355,9 +452,9 @@ vec3 getNormal(vec3 testPoint, Intersection last) {
   if (DynamicMode) {
     Node node = getNodeAt(testPoint);
     uint level = node.level;
-    float H00 = getMaxHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(0u, 0u));
-    float H10 = getMaxHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(1u, 0u));
-    float H01 = getMaxHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(0u, 1u));
+    float H00 = getHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(0u, 0u), true);
+    float H10 = getHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(1u, 0u), true);
+    float H01 = getHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(0u, 1u), true);
     float dHdx = (H10 - H00) / pow(2.0, float(MaxLevels - level));
     float dHdz = (H01 - H00) / pow(2.0, float(MaxLevels - level));
     return normalize(cross(vec3(0.0, dHdz, 1.0), vec3(1.0, dHdx, 0.0)));
@@ -393,7 +490,7 @@ vec3 tracePath(vec3 org, vec3 dir) {
     testPoint -= last.offset;
     last.offset = -last.offset;
 
-    // Surface sampleColor.
+    // Surface color.
     vec3 col = getPalette(normal);
     res *= col;
 
@@ -436,6 +533,15 @@ vec3 tracePath(vec3 org, vec3 dir) {
 
 #undef RAND
 
+// Casts a beam.
+float beamCastRay(vec3 ref, vec3 org, vec3 dir) {
+  vec3 testPoint = org;
+  Intersection last = Intersection(org, vec3(0.0));
+  float distance = castRay(testPoint, last, dir);
+  if (distance < 0.0) return 1e18;
+  return length(last.pos - ref);
+}
+
 // Casts a single ray (interactive mode).
 vec3 testCastRay(vec3 org, vec3 dir) {
   vec3 testPoint = org;
@@ -471,9 +577,20 @@ void apertureDither(inout vec3 pos, inout vec3 dir, float focalDist, float apert
 
 void main() {
   // Obtain fragment coordinates.
-  ivec2 pixelCoords = ivec3(gl_GlobalInvocationID).xy;
-  if (pixelCoords.x >= FrameWidth || pixelCoords.y >= FrameHeight) return;
-  vec2 fragCoords = vec2(pixelCoords) / vec2(float(FrameWidth), float(FrameHeight)) * 2.0 - 1.0;
+  uvec2 pixelIndices = gl_GlobalInvocationID.xy;
+  if (pixelIndices.x >= FrameWidth || pixelIndices.y >= FrameHeight) return;
+  vec2 fragCoords = vec2(pixelIndices * (BeamMode ? CurrBeamSize : 1u)) / vec2(float(FrameWidth), float(FrameHeight)) * 2.0 - 1.0;
+
+  // Retrieve previous beam results.
+  float beamResult = 0.0;
+  if (PrevBeamSize != 0) {
+    uint k = PrevBeamSize / CurrBeamSize;
+    float b00 = texelFetch(BeamTexture, ivec2(pixelIndices / k) + ivec2(0, 0), 0).r;
+    float b10 = texelFetch(BeamTexture, ivec2(pixelIndices / k) + ivec2(1, 0), 0).r;
+    float b01 = texelFetch(BeamTexture, ivec2(pixelIndices / k) + ivec2(0, 1), 0).r;
+    float b11 = texelFetch(BeamTexture, ivec2(pixelIndices / k) + ivec2(1, 1), 0).r;
+    beamResult = min(min(b00, b10), min(b01, b11));
+  }
 
   // Apply anti-aliasing.
   vec2 ditheredCoords = fragCoords;
@@ -500,24 +617,26 @@ void main() {
 
   // Calculate sample color.
   vec3 sampleColor;
-  if (PathTracing) {
+  if (BeamMode) {
+    vec3 ref = pos;
+    pos += dir * beamResult * 1.0; // TODO?
+    sampleColor = vec3(beamCastRay(ref, pos, dir));
+  } else if (PathTracing) {
+    pos += dir * beamResult * 0.9; // TODO?
     sampleColor = tracePath(pos, dir);
+    if (SampleCount != 0) {
+      vec3 prevSamples = texelFetch(PrevFrame, ivec2(pixelIndices), 0).rgb;
+      sampleColor = (sampleColor + prevSamples * float(SampleCount)) / float(SampleCount + 1u);
+    }
   } else if (ProfilerOn) {
+    pos += dir * beamResult * 1.0; // TODO?
     sampleColor = vec3(profileCastRay(pos, dir));
   } else {
+    pos += dir * beamResult * 1.0; // TODO?
     sampleColor = testCastRay(pos, dir);
   }
 
-  // Add sample color to average in path-tracing mode.
-  vec4 fragColor;
-  if (PathTracing && SampleCount != 0) {
-    vec3 prevSamples = texelFetch(PrevFrame, pixelCoords, 0).rgb;
-    fragColor = vec4((sampleColor + prevSamples * float(SampleCount)) / float(SampleCount + 1), 1.0);
-  } else {
-    fragColor = vec4(sampleColor, 1.0);
-  }
-
   // Write outputs.
-  imageStore(FrameBuffer, pixelCoords, fragColor);
-  if (pixelCoords.xy == ivec2(0, 0)) OutputCount = NodeCount;
+  imageStore(FrameBuffer, ivec2(pixelIndices), vec4(sampleColor, 1.0));
+  if (pixelIndices.xy == uvec2(0, 0)) OutputCount = NodeCount;
 }

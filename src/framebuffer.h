@@ -1,6 +1,7 @@
 #ifndef FRAMEBUFFER_H_
 #define FRAMEBUFFER_H_
 
+#include <cassert>
 #include <concepts>
 #include <optional>
 #include <utility>
@@ -10,20 +11,22 @@
 class FrameBuffer {
 public:
   FrameBuffer(size_t width, size_t height, size_t colorAttachCount, bool depthAttach);
+
   FrameBuffer(FrameBuffer&& r):
     mWidth(r.mWidth),
     mHeight(r.mHeight),
     mSize(r.mSize),
     mHandle(std::exchange(r.mHandle, OpenGL::null)),
     mColorTextures(std::move(r.mColorTextures)),
-    mDepthTexture(std::move(r.mDepthTexture)),
-    mDepthRenderBuffer(std::move(r.mDepthRenderBuffer)) {}
-  ~FrameBuffer();
+    mDepthTexture(std::exchange(r.mDepthTexture, OpenGL::null)),
+    mDepthRenderBuffer(std::exchange(r.mDepthRenderBuffer, OpenGL::null)) {}
 
   FrameBuffer& operator=(FrameBuffer&& r) {
     swap(*this, r);
     return *this;
   }
+
+  ~FrameBuffer();
 
   friend void swap(FrameBuffer& l, FrameBuffer& r) {
     using std::swap;
@@ -40,36 +43,15 @@ public:
   size_t height() { return mHeight; }
   size_t size() { return mSize; }
 
-  void bindBuffer(size_t index);
-  void bindBufferRead(size_t index);
   void bindBuffers();
+  static void unbindBuffers() { glBindFramebuffer(GL_DRAW_FRAMEBUFFER, OpenGL::null); }
+  void bindBufferForRead(size_t i);
 
-  static void unbind() {
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, OpenGL::null);
-    glDrawBuffer(GL_BACK);
-  }
-
-  static void unbindRead() {
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, OpenGL::null);
-    glReadBuffer(GL_BACK);
-  }
-
-  void bindColorTexturesAt(size_t startNumber) {
-    for (size_t i = 0; i < mColorTextures.size(); i++) {
-      glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + startNumber + i));
-      glBindTexture(GL_TEXTURE_2D, mColorTextures[i]);
-    }
-  }
-
-  void bindDepthTextureAt(size_t number) {
-    if (mDepthTexture.has_value()) {
-      glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + number));
-      glBindTexture(GL_TEXTURE_2D, mDepthTexture.value());
-    }
-  }
+  void bindColorTextureAt(size_t i, size_t index);
+  void bindDepthTextureAt(size_t index);
 
   std::vector<OpenGL::Object> const& colorTextures() const { return mColorTextures; }
-  std::optional<OpenGL::Object> const& depthTexture() const { return mDepthTexture; }
+  OpenGL::Object depthTexture() const { return mDepthTexture; }
 
 private:
   size_t mWidth;
@@ -78,8 +60,8 @@ private:
 
   OpenGL::Object mHandle = OpenGL::null;
   std::vector<OpenGL::Object> mColorTextures;
-  std::optional<OpenGL::Object> mDepthTexture;
-  std::optional<OpenGL::Object> mDepthRenderBuffer;
+  OpenGL::Object mDepthTexture = OpenGL::null;
+  OpenGL::Object mDepthRenderBuffer = OpenGL::null;
 };
 
 static_assert(std::move_constructible<FrameBuffer>);

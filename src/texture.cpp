@@ -39,7 +39,6 @@ Texture::Texture(Bitmap const& image, size_t levels) {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(levels));
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 0);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, static_cast<GLint>(levels));
-  glTexEnvf(GL_TEXTURE_FILTER_CONTROL, GL_TEXTURE_LOD_BIAS, 0.0f);
   for (size_t i = 0, scale = 1; i <= levels; i++, scale *= 2) {
     assert(scale <= size);
     Bitmap curr = image.shrink(scale);

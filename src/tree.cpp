@@ -61,7 +61,7 @@ void Tree::check() {
   ss << "Allocated nodes: " << mNodes.size();
   Log::info(ss.str());
   ss.str("");
-  ss << "Valid nodes: " << count;
+  ss << "Reachable nodes: " << count;
   Log::info(ss.str());
   ss.str("");
   ss << "Redundant nodes: " << redundant << " (" << redundant * 100 / count << "%)";

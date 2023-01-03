@@ -1,38 +1,43 @@
 #version 430 core
+// #extension GL_NV_shader_thread_shuffle : require
 
 // ===== Inputs =====
 
 layout (local_size_x = 8u, local_size_y = 8u, local_size_z = 1u)
 in;
 
+#define NUM_FRAMES 4
+uniform sampler2D FrameTexture[NUM_FRAMES];
+uniform sampler2D NoiseTexture;
+uniform sampler2D MaxTexture;
+uniform sampler2D MinTexture;
+
+uniform uint FrameWidth;
+uniform uint FrameHeight;
+uniform bool PathTracing;
+uniform bool ProfilerOn;
+uniform uint PrevBeamSize; // = 1u if no previous beam results.
+uniform uint PrevFrameIndex;
+uniform uint CurrBeamSize; // = 1u if not generating new beams.
+uniform uint CurrFrameIndex;
+
 // uniform mat4 ProjectionMatrix;
 // uniform mat4 ModelViewMatrix;
 uniform mat4 ProjectionInverse;
 uniform mat4 ModelViewInverse;
 uniform vec3 CameraPosition;
-uniform float RandomSeed;
-uniform bool BeamMode;
-uniform bool PathTracing;
-uniform bool ProfilerOn;
+uniform float CameraFov;
 // uniform float Time;
+uniform float RandomSeed;
 
-uniform sampler2D PrevFrame;
-uniform sampler2D NoiseTexture;
-uniform sampler2D MaxTexture;
-uniform sampler2D MinTexture;
-uniform sampler2D BeamTexture;
-uniform uint PrevBeamSize;
-uniform uint CurrBeamSize;
-uniform uint SampleCount;
-uniform uint FrameWidth;
-uniform uint FrameHeight;
 uniform bool DynamicMode;
 uniform uint MaxNodes;
 uniform uint MaxLevels;
 uniform uint NoiseLevels; // Noise map detail level `<= MaxLevels`.
 uniform uint PartialLevels; // Min noise level (using part of the noise map.)
+uniform float LodQuality; // 1.0 = high quality (side length = 1px.)
 
-layout (std430, binding = 1) restrict
+layout (std430, binding = 0) restrict
 buffer TreeData {
   uint NodeCount;
   uint Data[];
@@ -40,10 +45,10 @@ buffer TreeData {
 
 // ===== Outputs =====
 
-restrict writeonly
-uniform image2D FrameBuffer;
+layout (rgba32f) restrict writeonly
+uniform image2D FrameImage[NUM_FRAMES];
 
-layout (std430, binding = 2) restrict writeonly
+layout (std430, binding = 1) restrict writeonly
 buffer OutputData {
   uint OutputCount;
 };
@@ -75,11 +80,9 @@ float HeightScale;
 // #define FRACTALNOISE_COSINE_INTERPOLATION
 
 // Rendering distance.
-const uint MaxIterations = 128u;
+const uint MaxIterations = 256u; // 64u;
 
 // Level of details.
-const float LodFov = 70.0 / 180.0 * Pi;
-const float LodQuality = 1.0; // 1.0 = default quality (side length > 1px.)
 vec3 LodCenterPos;
 vec3 LodViewDir;
 
@@ -102,8 +105,8 @@ const vec3 SkyColorBottom = pow(vec3(90.0, 134.0, 206.0) / 255.0, vec3(Gamma));
 vec3 Palette[6] = vec3[](
   pow(vec3(147.5, 166.4, 77.0) / 255.0, vec3(Gamma)),
   pow(vec3(147.5, 166.4, 77.0) / 255.0, vec3(Gamma)),
-  pow(vec3(151.0, 228.0, 90.0) / 255.0, vec3(Gamma)),
   pow(vec3(144.0, 105.0, 64.0) / 255.0, vec3(Gamma)),
+  pow(vec3(151.0, 228.0, 90.0) / 255.0, vec3(Gamma)),
   pow(vec3(147.5, 166.4, 77.0) / 255.0, vec3(Gamma)),
   pow(vec3(147.5, 166.4, 77.0) / 255.0, vec3(Gamma))
 );
@@ -137,14 +140,10 @@ vec3 getSkyColor(vec3 dir) {
 }
 
 vec3 getPalette(vec3 normal) {
+  uvec3 sgn = uvec3(greaterThanEqual(normal, vec3(0.0)));
+  mat3 col = mat3(Palette[0 + sgn.x], Palette[2 + sgn.y], Palette[4 + sgn.z]);
   vec3 mag = abs(normal);
-  if (mag.x >= mag.y && mag.x >= mag.z) {
-    return normal.x >= 0.0 ? Palette[0] : Palette[1];
-  } else if (mag.y >= mag.z) {
-    return normal.y >= 0.0 ? Palette[2] : Palette[3];
-  } else {
-    return normal.z >= 0.0 ? Palette[4] : Palette[5];
-  }
+  return col * (mag * mag);
 }
 
 // ===== PRNG =====
@@ -242,10 +241,10 @@ float noise2D(uint level, uvec2 x, bool maximum) {
 
 /*
 float Factor[16] = float[](
-  1.0, 1.0, 1.0, 0.0, // Low freq
-  1.0, 0.0, 1.0, 1.0,
-  1.0, 1.0, 0.0, 1.0,
-  3.0, 1.0, 1.0, 1.0  // High freq
+  1.0, 1.0, 1.0, 1.0, // Low freq
+  1.0, 1.0, 0.7, 0.5,
+  0.3, 0.2, 0.1, 0.0,
+  0.0, 0.0, 0.0, 0.0  // High freq
 );
 */
 
@@ -267,10 +266,10 @@ float getHeight(uint level, uvec2 pos, bool maximum) {
 bool lodCheck(uint level, uvec3 pos) {
   vec3 rpos = (vec3(pos) + 0.5) * RootSize / float(1u << level) - LodCenterPos;
   float size = RootSize / float(1u << level);
-  float real = tan(LodFov / 2.0) * dot(rpos, LodViewDir) * 2.0 / float(FrameHeight);
-  return BeamMode ?
-    size > real * CurrBeamSize :
-    size > real / LodQuality;
+  float real = tan(CameraFov / 2.0) * dot(rpos, LodViewDir) * 2.0 / float(FrameHeight);
+  return (CurrBeamSize > 1u) ?
+    size > real / LodQuality && size > real * float(CurrBeamSize) :
+    size > real / LodQuality /* / (1.0 + 1.0 * constructFloat(hash(pos))) */;
 }
 
 bool generateNodeTerrain(uint level, uvec3 pos, out uint terr) {
@@ -338,11 +337,12 @@ Node getNodeAt(vec3 pos) {
   Box box = Box(vec3(0.0), RootSize);
   uint ptr = 0u;
   for (uint level = 0u; level <= MaxLevels; level++) {
-    if (!lodCheck(level, uvec3(pos) >> (MaxLevels - level))) return Node(1u, level, box);
     uint cdata = generateNode(ptr, level, uvec3(pos) >> (MaxLevels - level));
     if (cdata == 1u) return Node(1u, level, box); // Locked.
     // Check if reached leaf.
     if (IS_LEAF(cdata)) return Node(cdata, level, box);
+    // Check if out of LOD.
+    if (!lodCheck(level, uvec3(pos) >> (MaxLevels - level))) return Node(1u, level, box);
     ptr = CHILD_PTR(cdata);
     vec3 mid = box.xyz + box.w / 2.0;
     if (pos.x >= mid.x) { ptr += 1u; box.x = mid.x; }
@@ -382,10 +382,10 @@ float castRay(inout vec3 testPoint, inout Intersection last, vec3 dir) {
   return 1.0;
 }
 
+/*
 uint nodes[20];
 Box boxes[20];
 
-/*
 // Casts a ray through the octree [NEW METHOD: LAINE-KARRAS].
 // Returns the number of iterations divided by `MaxIterations`.
 float castRayLK(inout vec3 testPoint, inout Intersection last, vec3 dir) {
@@ -452,12 +452,12 @@ vec3 getNormal(vec3 testPoint, Intersection last) {
   if (DynamicMode) {
     Node node = getNodeAt(testPoint);
     uint level = node.level;
-    float H00 = getHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(0u, 0u), true);
-    float H10 = getHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(1u, 0u), true);
-    float H01 = getHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(0u, 1u), true);
-    float dHdx = (H10 - H00) / pow(2.0, float(MaxLevels - level));
-    float dHdz = (H01 - H00) / pow(2.0, float(MaxLevels - level));
-    return normalize(cross(vec3(0.0, dHdz, 1.0), vec3(1.0, dHdx, 0.0)));
+    float h00 = getHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(0u, 0u), true);
+    float h10 = getHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(1u, 0u), true);
+    float h01 = getHeight(level, (uvec2(testPoint.xz) >> (MaxLevels - level)) + uvec2(0u, 1u), true);
+    float dhdx = (h10 - h00) / pow(2.0, float(MaxLevels - level));
+    float dhdz = (h01 - h00) / pow(2.0, float(MaxLevels - level));
+    return normalize(cross(vec3(0.0, dhdz, 1.0), vec3(1.0, dhdx, 0.0)));
   }
 #endif
   return -last.offset;
@@ -465,7 +465,7 @@ vec3 getNormal(vec3 testPoint, Intersection last) {
 
 #ifdef HALTON_SEQUENCE
 uint Primes[16] = uint[16](2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53);
-#define RAND(j) halton(SampleCount, Primes[(i * 3 + j) % 16])
+#define RAND(j) halton(floatBitsToUint(RandomSeed), Primes[(i * 3 + j) % 16])
 #else
 #define RAND(j) rand(last.pos + Dither[j])
 #endif
@@ -520,10 +520,6 @@ vec3 tracePath(vec3 org, vec3 dir) {
       dir = vec3(cos(alpha), sin(alpha) * sin(beta), sin(alpha) * cos(beta));
 
       float proj = dot(normal, dir);
-      if (proj < 0.0) {
-        proj = -proj;
-        dir += 2.0 * proj * normal;
-      }
       res *= proj;
     }
   }
@@ -539,11 +535,13 @@ float beamCastRay(vec3 ref, vec3 org, vec3 dir) {
   Intersection last = Intersection(org, vec3(0.0));
   float distance = castRay(testPoint, last, dir);
   if (distance < 0.0) return 1e18;
-  return length(last.pos - ref);
+  // Back offset (account for possible edges and corners.)
+  float real = tan(CameraFov / 2.0) * dot(last.pos - ref, LodViewDir) * 2.0 / float(FrameHeight);
+  return length(last.pos - ref) - real * float(CurrBeamSize) / sqrt(2.0);
 }
 
 // Casts a single ray (interactive mode).
-vec3 testCastRay(vec3 org, vec3 dir) {
+vec3 testCastRay(vec3 ref, vec3 org, vec3 dir) {
   vec3 testPoint = org;
   Intersection last = Intersection(org, vec3(0.0));
   float distance = castRay(testPoint, last, dir);
@@ -552,8 +550,11 @@ vec3 testCastRay(vec3 org, vec3 dir) {
 
   vec3 background = getSkyColor(dir);
   vec3 res = getPalette(normal);
-  res = mix(res * 0.5, res, clamp(dot(normal, -SunlightDirection), 0.0, 1.0));
+  res = mix(res * 0.2, res, clamp(dot(normal, -SunlightDirection), 0.0, 1.0));
   res = mix(background, res, clamp((1.0 - distance) * 2.0, 0.0, 1.0));
+  // Wireframe outlines.
+  uvec3 fs = uvec3(lessThanEqual(abs(last.pos - round(last.pos)), vec3(0.05)));
+  if (fs.x + fs.y + fs.z >= 2u) res = mix(res * 0.2, res, clamp(length(last.pos - ref) / 256.0, 0.0, 1.0));
   return res;
 }
 
@@ -563,6 +564,16 @@ float profileCastRay(vec3 org, vec3 dir) {
   Intersection last = Intersection(org, vec3(0.0));
   float distance = castRay(testPoint, last, dir);
   if (distance < 0.0) return 0.0;
+  /*
+  // Warp-wide maximum.
+  float warpMax = distance;
+  warpMax = max(warpMax, shuffleXorNV(warpMax, 16,32));
+  warpMax = max(warpMax, shuffleXorNV(warpMax, 8, 32));
+  warpMax = max(warpMax, shuffleXorNV(warpMax, 4, 32));
+  warpMax = max(warpMax, shuffleXorNV(warpMax, 2, 32));
+  warpMax = max(warpMax, shuffleXorNV(warpMax, 1, 32));
+  distance = warpMax;
+  */
   return distance;
 }
 
@@ -579,18 +590,24 @@ void main() {
   // Obtain fragment coordinates.
   uvec2 pixelIndices = gl_GlobalInvocationID.xy;
   if (pixelIndices.x >= FrameWidth || pixelIndices.y >= FrameHeight) return;
-  vec2 fragCoords = vec2(pixelIndices * (BeamMode ? CurrBeamSize : 1u)) / vec2(float(FrameWidth), float(FrameHeight)) * 2.0 - 1.0;
+  vec2 fragCoords = vec2(pixelIndices * CurrBeamSize) / vec2(float(FrameWidth), float(FrameHeight)) * 2.0 - 1.0;
 
   // Retrieve previous beam results.
   float beamResult = 0.0;
-  if (PrevBeamSize != 0) {
+  if (PrevBeamSize > 1u) {
     uint k = PrevBeamSize / CurrBeamSize;
-    float b00 = texelFetch(BeamTexture, ivec2(pixelIndices / k) + ivec2(0, 0), 0).r;
-    float b10 = texelFetch(BeamTexture, ivec2(pixelIndices / k) + ivec2(1, 0), 0).r;
-    float b01 = texelFetch(BeamTexture, ivec2(pixelIndices / k) + ivec2(0, 1), 0).r;
-    float b11 = texelFetch(BeamTexture, ivec2(pixelIndices / k) + ivec2(1, 1), 0).r;
+    float b00 = texelFetch(FrameTexture[PrevFrameIndex], ivec2(pixelIndices / k) + ivec2(0, 0), 0).r;
+    float b10 = texelFetch(FrameTexture[PrevFrameIndex], ivec2(pixelIndices / k) + ivec2(1, 0), 0).r;
+    float b01 = texelFetch(FrameTexture[PrevFrameIndex], ivec2(pixelIndices / k) + ivec2(0, 1), 0).r;
+    float b11 = texelFetch(FrameTexture[PrevFrameIndex], ivec2(pixelIndices / k) + ivec2(1, 1), 0).r;
     beamResult = min(min(b00, b10), min(b01, b11));
   }
+  /*
+  if (CurrBeamSize == 1u) {
+    imageStore(FrameBuffer, ivec2(pixelIndices), vec4(vec3(beamResult / 10000.0), 1.0));
+    return;
+  }
+  */
 
   // Apply anti-aliasing.
   vec2 ditheredCoords = fragCoords;
@@ -608,35 +625,39 @@ void main() {
   HeightScale = RootSize / 256.0;
   vec3 dir = normalize(divide(ModelViewInverse * ProjectionInverse * vec4(ditheredCoords, 1.0, 1.0)));
   vec3 centerDir = normalize(divide(ModelViewInverse * ProjectionInverse * vec4(0.0, 0.0, 1.0, 1.0)));
-  vec3 pos = CameraPosition + vec3(RootSize / 2.0 + 0.5, RootSize + 0.5, RootSize / 2.0 + 0.5);
+  vec3 pos = CameraPosition; // + vec3(RootSize / 2.0, RootSize / 2.0, RootSize / 2.0);
 #ifdef DEPTH_OF_FIELD
   apertureDither(pos, dir, RootSize / 6.0 / dot(dir, centerDir), 0.0);
 #endif
-  LodCenterPos = pos;
+  LodCenterPos = floor(pos) + 0.5;
   LodViewDir = centerDir;
+
+  // Beam mode.
+  if (CurrBeamSize > 1u) {
+    float value = beamCastRay(pos, pos + dir * beamResult, dir);
+    imageStore(FrameImage[CurrFrameIndex], ivec2(pixelIndices), vec4(value));
+    return;
+  }
 
   // Calculate sample color.
   vec3 sampleColor;
-  if (BeamMode) {
-    vec3 ref = pos;
-    pos += dir * beamResult * 1.0; // TODO?
-    sampleColor = vec3(beamCastRay(ref, pos, dir));
-  } else if (PathTracing) {
-    pos += dir * beamResult * 0.9; // TODO?
-    sampleColor = tracePath(pos, dir);
+  if (PathTracing) {
+    sampleColor = tracePath(pos + dir * beamResult, dir);
+    /*
     if (SampleCount != 0) {
-      vec3 prevSamples = texelFetch(PrevFrame, ivec2(pixelIndices), 0).rgb;
+      vec3 prevSamples = texelFetch(PrevFrameTexture, ivec2(pixelIndices), 0).rgb;
       sampleColor = (sampleColor + prevSamples * float(SampleCount)) / float(SampleCount + 1u);
     }
+    */
   } else if (ProfilerOn) {
-    pos += dir * beamResult * 1.0; // TODO?
-    sampleColor = vec3(profileCastRay(pos, dir));
+    sampleColor = vec3(profileCastRay(pos + dir * beamResult, dir));
   } else {
-    pos += dir * beamResult * 1.0; // TODO?
-    sampleColor = testCastRay(pos, dir);
+    sampleColor = testCastRay(pos, pos + dir * beamResult, dir);
   }
+  imageStore(FrameImage[CurrFrameIndex], ivec2(pixelIndices), vec4(sampleColor, 1.0));
 
-  // Write outputs.
-  imageStore(FrameBuffer, ivec2(pixelIndices), vec4(sampleColor, 1.0));
-  if (pixelIndices.xy == uvec2(0, 0)) OutputCount = NodeCount;
+  // Additional outputs.
+  if (pixelIndices.xy == uvec2(0, 0)) {
+    OutputCount = NodeCount;
+  }
 }

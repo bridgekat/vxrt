@@ -13,7 +13,7 @@ out vec4 FragColor;
 uniform sampler2D Texture2D;
 uniform bool Texture2DEnabled;
 uniform bool ColorEnabled;
-uniform bool GammaCorrection;
+uniform bool GammaConversion; // Whether to interpret input as linear and convert it to sRGB.
 
 const float Gamma = 2.2;
 
@@ -21,6 +21,6 @@ void main() {
   vec4 res = vec4(1.0);
   if (Texture2DEnabled) res *= texture(Texture2D, TexCoord.xy);
   if (ColorEnabled) res *= Color;
-  if (GammaCorrection) res.rgb = pow(res.rgb, vec3(1.0 / Gamma));
+  if (GammaConversion) res.rgb = pow(res.rgb, vec3(1.0 / Gamma));
   FragColor = res;
 }

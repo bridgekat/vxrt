@@ -50,23 +50,25 @@ public:
   }
 
   OpenGL::Object handle() const noexcept { return mHandle; }
-  OpenGL::UniformLocation uniformLocation(std::string const& name);
+  OpenGL::UniformLocation uniformLocation(std::string const& name) const noexcept;
 
   // `-1`s in uniform locations are silently ignored.
   // See: https://registry.khronos.org/OpenGL-Refpages/gl4/html/glUniform.xhtml
 #define L uniformLocation
-  void uniformInt(std::string const& name, int value) { glUniform1i(L(name), value); }
-  void uniformUInt(std::string const& name, unsigned int value) { glUniform1ui(L(name), value); }
-  void uniformBool(std::string const& name, bool value) { glUniform1i(L(name), value ? 1 : 0); }
-  void uniformSampler(std::string const& name, size_t index) { glUniform1i(L(name), index); }
-  void uniformImage(std::string const& name, size_t index) { glUniform1i(L(name), index); }
-  void uniformFloat(std::string const& name, float x) { glUniform1f(L(name), x); }
-  void uniformVec2(std::string const& name, float x, float y) { glUniform2f(L(name), x, y); }
-  void uniformVec3(std::string const& name, float x, float y, float z) { glUniform3f(L(name), x, y, z); }
-  void uniformVec4(std::string const& name, float x, float y, float z, float w) { glUniform4f(L(name), x, y, z, w); }
-  void uniformMat4(std::string const& name, float* p, bool transpose = true) {
-    glUniformMatrix4fv(L(name), 1, transpose ? GL_TRUE : GL_FALSE, p);
-  }
+  // clang-format off
+  void uniformInt(std::string const& name, GLint value) const noexcept { glUniform1i(L(name), value); }
+  void uniformUInt(std::string const& name, GLuint value) const noexcept { glUniform1ui(L(name), value); }
+  void uniformBool(std::string const& name, bool value) const noexcept { glUniform1i(L(name), value ? 1 : 0); }
+  void uniformSampler(std::string const& name, GLint index) const noexcept { glUniform1i(L(name), index); }
+  void uniformSamplers(std::string const& name, size_t count, GLint const* indices) const noexcept { glUniform1iv(L(name), count, indices); }
+  void uniformImage(std::string const& name, GLint index) const noexcept { glUniform1i(L(name), index); }
+  void uniformImages(std::string const& name, size_t count, GLint const* indices) const noexcept { glUniform1iv(L(name), count, indices); }
+  void uniformFloat(std::string const& name, GLfloat x) const noexcept { glUniform1f(L(name), x); }
+  void uniformVec2(std::string const& name, GLfloat x, GLfloat y) const noexcept { glUniform2f(L(name), x, y); }
+  void uniformVec3(std::string const& name, GLfloat x, GLfloat y, GLfloat z) const noexcept { glUniform3f(L(name), x, y, z); }
+  void uniformVec4(std::string const& name, GLfloat x, GLfloat y, GLfloat z, GLfloat w) const noexcept { glUniform4f(L(name), x, y, z, w); }
+  void uniformMat4(std::string const& name, GLfloat const* p, bool transpose = true) const noexcept { glUniformMatrix4fv(L(name), 1, transpose ? GL_TRUE : GL_FALSE, p); }
+  // clang-format on
 #undef L
 
   void use() const { glUseProgram(mHandle); }

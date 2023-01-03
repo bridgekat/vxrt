@@ -3,6 +3,7 @@
 
 #include <concepts>
 #include <cstdint>
+#include <string>
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
 #include "common.h"
@@ -46,6 +47,10 @@ public:
   static constexpr InternalFormat internalFormatRG = GL_RG;
   static constexpr InternalFormat internalFormatRGB = GL_RGB;
   static constexpr InternalFormat internalFormatRGBA = GL_RGBA;
+  static constexpr InternalFormat internalFormat1f = GL_R32F;
+  static constexpr InternalFormat internalFormat2f = GL_RG32F;
+  static constexpr InternalFormat internalFormat3f = GL_RGB32F;
+  static constexpr InternalFormat internalFormat4f = GL_RGBA32F;
 
   OpenGL(SDL_GLContext context);
   OpenGL(OpenGL&&) = delete;
@@ -59,6 +64,8 @@ public:
   void setClearColor(Vec3f const& col, float alpha = 0.0f) { glClearColor(col.x, col.y, col.z, alpha); }
   void setClearDepth(float depth) { glClearDepth(depth); }
   void clear() { glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT); }
+
+  std::string getString(GLenum name) { return reinterpret_cast<char const*>(glGetString(name)); }
 
 private:
   SDL_GLContext mContext;

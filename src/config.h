@@ -32,8 +32,8 @@ public:
     }
   }
 
-  void load(std::string const& file = std::string(ConfigPath) + ConfigFilename);
-  void save(std::string const& file = std::string(ConfigPath) + ConfigFilename);
+  void load(std::string const& file);
+  void save(std::string const& file);
 
 private:
   std::map<std::string, std::string> mValues;

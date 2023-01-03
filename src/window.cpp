@@ -23,10 +23,14 @@ void GLCALLBACK glDebugCallback(GLenum, GLenum, GLuint, GLenum severity, GLsizei
 }
 
 Window::Window(
-  std::string const& title, size_t width, size_t height, size_t multisample, bool forceMinimumVersion, bool debugContext
+  std::string const& title,
+  size_t width,
+  size_t height,
+  size_t multisample,
+  bool forceMinimumVersion,
+  bool debugContext
 ):
-  mTitle(title),
-  mWidth(width), mHeight(height) {
+  mTitle(title), mWidth(width), mHeight(height) {
   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER);
 
   Log::info("Creating SDL window with OpenGL core context...");
@@ -35,22 +39,26 @@ Window::Window(
   SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
   if (multisample > 1) {
-    Log::info("- With multisampling buffers");
+    Log::info("- with multisampling buffers");
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, multisample);
   }
   if (forceMinimumVersion) {
-    Log::info("- With minimum required GL version (4.3)");
+    Log::info("- with minimum required GL version (4.3)");
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
   }
   if (debugContext) {
-    Log::info("- With debug mode context");
+    Log::info("- with debug mode context");
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
   }
 
   mWindow = SDL_CreateWindow(
-    mTitle.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, mWidth, mHeight,
+    mTitle.c_str(),
+    SDL_WINDOWPOS_UNDEFINED,
+    SDL_WINDOWPOS_UNDEFINED,
+    mWidth,
+    mHeight,
     SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
   );
   if (!mWindow) {

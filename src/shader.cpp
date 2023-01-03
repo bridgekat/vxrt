@@ -67,7 +67,7 @@ ShaderProgram::~ShaderProgram() {
   if (mHandle != OpenGL::null) glDeleteProgram(mHandle);
 }
 
-OpenGL::UniformLocation ShaderProgram::uniformLocation(std::string const& name) {
+OpenGL::UniformLocation ShaderProgram::uniformLocation(std::string const& name) const noexcept {
   auto loc = glGetUniformLocation(mHandle, name.c_str());
   if (loc == -1) Log::verbose("Specifying unused uniform variable: " + name);
   return loc;

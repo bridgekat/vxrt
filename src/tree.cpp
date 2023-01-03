@@ -15,23 +15,25 @@ void Tree::generate() {
   generateNode(0, 0, 0, 0, mSize);
 }
 
-void Tree::upload(ShaderStorageBuffer& ssbo, bool allocate) {
+void Tree::upload(ShaderStorage& ssbo) {
   Log::info("Uploading tree data...");
-  if (allocate) ssbo.allocateImmutable((mNodes.size() + 1) * sizeof(unsigned int), true);
-  unsigned int nodeCount = mNodes.size();
-  ssbo.uploadSubData(0, sizeof(unsigned int), &nodeCount);
-  ssbo.uploadSubData(sizeof(unsigned int), mNodes.size() * sizeof(unsigned int), mNodes.data());
+
+  assert(ssbo.size() >= uploadSize());
+  uint32_t nodeCount = mNodes.size();
+  ssbo.upload(0, sizeof(uint32_t), &nodeCount);
+  ssbo.upload(sizeof(uint32_t), mNodes.size() * sizeof(uint32_t), mNodes.data());
+
   std::stringstream ss;
   ss << nodeCount << " nodes uploaded.";
   Log::info(ss.str());
 }
 
-void Tree::download(ShaderStorageBuffer& ssbo) {
+void Tree::download(ShaderStorage& ssbo) {
   Log::info("Downloading tree data...");
-  unsigned int nodeCount = 0;
-  ssbo.downloadSubData(0, sizeof(unsigned int), &nodeCount);
+  uint32_t nodeCount = 0;
+  ssbo.download(0, sizeof(uint32_t), &nodeCount);
   mNodes.resize(nodeCount);
-  ssbo.downloadSubData(sizeof(unsigned int), sizeof(unsigned int) * nodeCount, mNodes.data());
+  ssbo.download(sizeof(uint32_t), sizeof(uint32_t) * nodeCount, mNodes.data());
   std::stringstream ss;
   ss << nodeCount << " nodes downloaded.";
   Log::info(ss.str());
@@ -68,35 +70,36 @@ void Tree::check() {
   Log::info(ss.str());
 }
 
-int Tree::gcdfs(size_t ind, size_t rind, Tree& res) {
-  assert(rind < res.mNodes.size());
-  res.mNodes[rind] = mNodes[ind];
-  if (!mNodes[ind].generated) return -1;
-  if (mNodes[ind].leaf) return mNodes[ind].data;
-  bool re = true;
-  int c0 = 0;
-  size_t children = res.mNodes.size();
-  res.mNodes[rind].data = children;
-  res.mNodes.resize(children + 8);
+// Returns true if node is merged to a single leaf.
+bool Tree::gcdfs(Node const& node, Node& other, Tree& res) {
+  other = node;
+  if (!node.generated) return false;
+  if (node.leaf) return true;
+  // Allocate children for `other`.
+  other.data = res.mNodes.size();
+  res.mNodes.resize(other.data + 8);
+  // Mid: `node` and `other` are intermediate.
+  bool mergeable = true;
   for (size_t i = 0; i < 8; i++) {
-    int curr = gcdfs(mNodes[ind].data + i, children + i, res);
-    if (i == 0) c0 = curr;
-    if (curr < 0 || curr != c0) re = false;
+    bool f = gcdfs(mNodes[node.data + i], res.mNodes[other.data + i], res);
+    if (!f || res.mNodes[other.data + i].data != res.mNodes[other.data].data) mergeable = false;
   }
-  if (re) {
-    assert(res.mNodes.size() == children + 8);
-    res.mNodes[rind].leaf = true;
-    res.mNodes[rind].data = c0;
-    res.mNodes.resize(children);
+  if (mergeable) {
+    assert(res.mNodes.size() == other.data + 8);
+    auto data = res.mNodes[other.data].data;
+    res.mNodes.resize(other.data);
+    other.leaf = true;
+    other.data = data;
   }
-  return re ? c0 : -1;
+  return mergeable;
 }
 
 void Tree::gc(Tree& res) {
   Log::info("Optimizing tree...");
-  res.mNodes.push_back(TreeNode());
-  gcdfs(0, 0, res);
-  //	res.check();
+  res.mNodes.reserve(mNodes.size());
+  res.mNodes.push_back(Node());
+  gcdfs(mNodes[0], res.mNodes[0], res);
+  // res.check();
 }
 
 void Tree::generateNode(size_t ind, int x0, int y0, int z0, int size) {

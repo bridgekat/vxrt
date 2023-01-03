@@ -2,6 +2,7 @@
 #define COMMON_H_
 
 #include <cstdint>
+#include <string>
 
 // Compiler.
 #ifdef _MSC_VER
@@ -24,14 +25,13 @@
 #  define VXRT_TARGET_POSIX
 #endif
 
-constexpr char const* RootPath = "./";
-constexpr char const* ConfigPath = "./";
-constexpr char const* ShaderPath = "./Shaders/";
-constexpr char const* ScreenshotPath = "./Screenshots/";
-constexpr char const* ConfigFilename = "Config.ini";
+using std::size_t;
 
-inline size_t ceilLog2(size_t x) {
-  size_t res = 0;
+// See: https://stackoverflow.com/questions/22346369/initialize-integer-literal-to-stdsize-t
+constexpr auto operator"" _z(unsigned long long n) -> size_t { return n; }
+
+inline auto ceilLog2(size_t x) -> size_t {
+  auto res = 0_z;
   x--;
   while (x > 0) {
     x >>= 1;
@@ -40,6 +40,13 @@ inline size_t ceilLog2(size_t x) {
   return res;
 }
 
-inline size_t lowBit(size_t x) { return x & (-x); }
+inline auto lowBit(size_t x) -> size_t { return x & (-x); }
+
+// Paths.
+inline auto rootPath() -> std::string { return "./"; }
+inline auto configPath() -> std::string { return "./"; }
+inline auto shaderPath() -> std::string { return "./Shaders/"; };
+inline auto screenshotPath() -> std::string { return "./Screenshots/"; }
+inline auto configFilename() -> std::string { return "Config.ini"; }
 
 #endif // COMMON_H_

@@ -5,61 +5,72 @@
 #include "camera.h"
 #include "config.h"
 #include "framebuffer.h"
-#include "shaderstoragebuffer.h"
+#include "shaderstorage.h"
 #include "texture.h"
 #include "tree.h"
 #include "updatescheduler.h"
 #include "vertexarray.h"
 #include "window.h"
 
-double const gamma = 2.2;
-size_t const prevFrameTextureIndex = 0, noiseTextureIndex = 1, maxTextureIndex = 2, minTextureIndex = 3,
-             beamTextureIndex = 4;
-size_t const outImageIndex = 0;
+struct MainOutputData {
+  uint32_t count;
+};
 
-size_t patchWidth, patchHeight;
-size_t renderWidth = 0, renderHeight = 0;
+struct HitTestOutputData {
+  float velocity[4];
+  bool onGround;
+};
 
-void enablePathTracing(Window& window, std::array<FrameBuffer, 3>& fbo) {
-  if (renderWidth > 0 && renderHeight > 0) {
-    fbo[0] = FrameBuffer(renderWidth, renderHeight, 1, false);
-    fbo[1] = FrameBuffer(renderWidth, renderHeight, 1, false);
-    fbo[2] = FrameBuffer(renderWidth, renderHeight, 1, false);
+constexpr auto numFrames = 2_z;
+constexpr auto beamSizes = std::array<size_t, numFrames>{4_z, 1_z};
+
+constexpr auto noiseTextureIndex = 0, maxTextureIndex = 1, minTextureIndex = 2;
+constexpr auto frameTextureIndices = std::array<GLint, numFrames>{3, 4};
+constexpr auto frameImageIndices = std::array<GLint, numFrames>{0, 1};
+constexpr auto treeBufferIndex = 0, mainOutputBufferIndex = 1, hitTestOutputBufferIndex = 2;
+
+auto initTreeBuffer(
+  ShaderProgram const& mainShader,
+  bool dynamicMode,
+  size_t maxNodes,
+  size_t worldSize,
+  size_t maxHeight
+) -> ShaderStorage {
+  if (dynamicMode) {
+    auto initialHeader = uint32_t(1);
+    auto res = ShaderStorage(sizeof(initialHeader) + sizeof(uint32_t) * maxNodes);
+    res.upload(0, sizeof(initialHeader), &initialHeader);
+    return res;
+  } else {
+    auto tree = Tree(worldSize, maxHeight);
+    tree.generate();
+    auto res = ShaderStorage(tree.uploadSize());
+    tree.upload(res);
+    return res;
   }
-  window.setMouseLocked(false);
 }
 
-void disablePathTracing(Window& window, std::array<FrameBuffer, 3>& fbo) {
-  if (renderWidth > 0 && renderHeight > 0) {
-    fbo[0] = FrameBuffer(window.width(), window.height(), 1, false);
-    fbo[1] = FrameBuffer(window.width(), window.height(), 1, false);
-    fbo[2] = FrameBuffer(window.width(), window.height(), 1, false);
-  }
-  window.setMouseLocked(true);
-}
-
-OpenGL::Object loadNoiseMipmaps(Bitmap const& image, bool maximal) {
-  size_t size = image.width();
-  size_t levels = ceilLog2(size);
-  OpenGL::Object res;
-  glGenTextures(1, &res);
-  glBindTexture(GL_TEXTURE_2D, res);
+auto loadNoiseMipmaps(Bitmap const& image, bool maximal) -> Texture {
+  auto const size = image.width();
+  auto const levels = ceilLog2(size);
+  auto res = Texture();
+  auto prev = res.push();
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(levels));
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 0);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, static_cast<GLint>(levels));
-  for (size_t level = 0, scale = 1; level <= levels; level++, scale *= 2) {
+  for (auto level = 0_z, scale = 1_z; level <= levels; level++, scale *= 2) {
     assert(scale <= size);
-    Bitmap curr(size / scale, size / scale, image.bytesPerPixel());
-    for (size_t i = 0; i < size / scale; i++)
-      for (size_t j = 0; j < size / scale; j++)
-        for (size_t k = 0; k < image.bytesPerPixel(); k++) {
-          uint8_t sum = maximal ? 0 : 255;
-          for (size_t i1 = 0; i1 < scale; i1++)
-            for (size_t j1 = 0; j1 < scale; j1++) {
-              uint8_t c = image.at(j * scale + j1, i * scale + i1, k);
+    auto curr = Bitmap(size / scale, size / scale, image.bytesPerPixel());
+    for (auto i = 0_z; i < size / scale; i++)
+      for (auto j = 0_z; j < size / scale; j++)
+        for (auto k = 0_z; k < image.bytesPerPixel(); k++) {
+          auto sum = maximal ? uint8_t(0) : uint8_t(255);
+          for (auto i1 = 0_z; i1 < scale; i1++)
+            for (auto j1 = 0_z; j1 < scale; j1++) {
+              auto const c = image.at(j * scale + j1, i * scale + i1, k);
               sum = maximal ? std::max(sum, c) : std::min(sum, c);
             }
           curr.at(j, i, k) = sum;
@@ -76,79 +87,127 @@ OpenGL::Object loadNoiseMipmaps(Bitmap const& image, bool maximal) {
       curr.data()
     );
   }
+  res.pop(prev);
   return res;
 }
 
-int main() {
-  Config config;
-  config.load();
+auto updateCameraFrame(Window const& window, Camera& camera) -> void {
+  MouseState mouse = window.mouseMotion();
+  camera.rotation += Vec3f(-mouse.y * 0.3f, -mouse.x * 0.3f, 0.0f);
+}
 
-  size_t multisample = config.getOr("OpenGL.Multisamples", 0);
-  bool forceMinimumVersion = config.getOr("OpenGL.ForceMinimumVersion", 0) != 0;
-  bool debugContext = config.getOr("OpenGL.Debugging", 0) != 0;
+auto updateCameraInterval(
+  Window const& window,
+  Camera& camera,
+  Vec3f& velocity,
+  float& accY,
+  bool& onGround,
+  bool flying
+) -> void {
+  camera.position += velocity;
 
-  Window& window = Window::singleton("", 852, 480, multisample, forceMinimumVersion, debugContext);
-  OpenGL& gl = window.gl();
-
-  std::stringstream ss;
-  ss.str("");
-  ss << "Renderer: " << glGetString(GL_RENDERER) << " [" << glGetString(GL_VENDOR) << "]";
-  Log::info(ss.str());
-  ss.str("");
-  ss << "OpenGL version: " << glGetString(GL_VERSION);
-  Log::info(ss.str());
-
-  patchWidth = config.getOr("PathTracing.PatchWidth", 8);
-  patchHeight = config.getOr("PathTracing.PatchHeight", 8);
-  renderWidth = config.getOr("PathTracing.RenderWidth", 0);
-  renderHeight = config.getOr("PathTracing.RenderHeight", 0);
-
-  ShaderProgram basicShader({
-    ShaderStage(OpenGL::vertexShader, std::string(ShaderPath) + "Basic.vsh"),
-    ShaderStage(OpenGL::fragmentShader, std::string(ShaderPath) + "Basic.fsh"),
-  });
-  ShaderProgram mainShader({
-    ShaderStage(OpenGL::computeShader, std::string(ShaderPath) + "Main.csh"),
-  });
-
-  // Init voxels.
-  bool dynamicMode = config.getOr("World.Dynamic", 0) != 0;
-  size_t maxNodes = config.getOr("World.Dynamic.MaxNodes", 268435454);
-  size_t maxHeight = config.getOr("World.Static.MaxHeight", 256);
-  size_t worldLevels = config.getOr("World.MaxLevels", 8);
-  size_t noiseLevels = config.getOr("World.Dynamic.NoiseLevels", 8);
-  size_t partialLevels = config.getOr("World.Dynamic.PartialLevels", 4);
-  size_t noiseSize = 1u << noiseLevels;
-
-  ShaderStorageBuffer ssbo(mainShader, "TreeData", 1);
-  if (dynamicMode) {
-    uint32_t initialHeader = 1;
-    ssbo.allocateImmutable(sizeof(initialHeader) + sizeof(uint32_t) * maxNodes, true);
-    ssbo.uploadSubData(0, sizeof(initialHeader), &initialHeader);
+  if (flying) {
+    velocity *= 0.8f;
+    accY = 0.0f;
   } else {
-    maxNodes = 0;
-    Tree tree(1u << worldLevels, maxHeight);
-    tree.generate();
-    tree.upload(ssbo, true);
+    velocity.x *= 0.4f;
+    velocity.z *= 0.4f;
+    if (onGround) accY = 0.0f;
+    else velocity.y += accY;
+    accY -= 0.005f;
   }
 
-  ShaderStorageBuffer outBuffer(mainShader, "OutputData", 2);
-  uint32_t initialData = 0;
-  outBuffer.allocateImmutable(sizeof(initialData), true);
-  outBuffer.uploadSubData(0, sizeof(initialData), &initialData);
+  auto acc = Vec3f(0);
+  if (window.isKeyPressed(SDL_SCANCODE_W)) acc += Vec3f(0, 0, -1);
+  if (window.isKeyPressed(SDL_SCANCODE_S)) acc += Vec3f(0, 0, 1);
+  if (window.isKeyPressed(SDL_SCANCODE_A)) acc += Vec3f(-1, 0, 0);
+  if (window.isKeyPressed(SDL_SCANCODE_D)) acc += Vec3f(1, 0, 0);
+  if (flying) {
+    if (window.isKeyPressed(SDL_SCANCODE_SPACE)) acc += Vec3f(0, 1, 0);
+    if (window.isKeyPressed(SDL_SCANCODE_LCTRL)) acc += Vec3f(0, -1, 0);
+  } else if (onGround) {
+    if (window.isKeyPressed(SDL_SCANCODE_SPACE)) velocity.y = 0.2f;
+  }
+  if (window.isKeyPressed(SDL_SCANCODE_TAB)) acc *= 256.0f;
 
-  // Init noise.
-  Bitmap noiseImage(noiseSize, noiseSize, 4);
+  acc *= 0.1f;
+  velocity += camera.transformedVelocity(acc, Vec3i(0, 1, 0));
+}
+
+auto fullscreenQuad(float width, float height, float size) -> VertexArray {
+  auto wfrac = width / size, hfrac = height / size;
+  return VertexArray(VertexLayout(OpenGL::triangleStrip, 2, 2))
+    .texCoords({0.0f, hfrac})
+    .vertex({-1.0f, 1.0f})
+    .texCoords({0.0f, 0.0f})
+    .vertex({-1.0f, -1.0f})
+    .texCoords({wfrac, hfrac})
+    .vertex({1.0f, 1.0f})
+    .texCoords({wfrac, 0.0f})
+    .vertex({1.0f, -1.0f});
+}
+
+auto main() -> int {
+  auto config = Config();
+  config.load(configPath() + configFilename());
+
+  auto const multisample = config.getOr("GL.Multisamples", 0_z);
+  auto const forceMinimumVersion = config.getOr("GL.ForceMinimumVersion", 0) != 0;
+  auto const debugContext = config.getOr("GL.Debugging", 0) != 0;
+
+  auto const fov = config.getOr("Render.FieldOfView", 70.0f);
+  auto const workgroupWidth = config.getOr("Render.WorkgroupWidth", 8_z);
+  auto const workgroupHeight = config.getOr("Render.WorkgroupHeight", 8_z);
+  auto const renderWidth = config.getOr("Render.RenderWidth", 0_z);
+  auto const renderHeight = config.getOr("Render.RenderHeight", 0_z);
+
+  auto const dynamicMode = config.getOr("World.Dynamic", 0) != 0;
+  auto const maxNodes = config.getOr("World.Dynamic.MaxNodes", 268435454_z);
+  auto const maxHeight = config.getOr("World.Static.MaxHeight", 256_z);
+  auto const worldLevels = config.getOr("World.MaxLevels", 8_z);
+  auto const noiseLevels = config.getOr("World.Dynamic.NoiseLevels", 8_z);
+  auto const partialLevels = config.getOr("World.Dynamic.PartialLevels", 4_z);
+  auto const lodQuality = config.getOr("World.Dynamic.LodQuality", 0.5f);
+
+  auto& window = Window::singleton("", 852, 480, multisample, forceMinimumVersion, debugContext);
+  auto& gl = window.gl();
+
+  Log::info("Renderer: " + gl.getString(GL_RENDERER) + " [" + gl.getString(GL_VENDOR) + "]");
+  Log::info("OpenGL version: " + gl.getString(GL_VERSION));
+
+  // Load shaders.
+  auto const basicShader = ShaderProgram({
+    ShaderStage(OpenGL::vertexShader, shaderPath() + "Basic.vsh"),
+    ShaderStage(OpenGL::fragmentShader, shaderPath() + "Basic.fsh"),
+  });
+
+  auto const mainShader = ShaderProgram({ShaderStage(OpenGL::computeShader, shaderPath() + "Main.csh")});
+  auto const mainOutput = ShaderStorage(sizeof(MainOutputData));
+  mainOutput.bindAt(mainOutputBufferIndex);
+
+  auto const hitTestShader = ShaderProgram({ShaderStage(OpenGL::computeShader, shaderPath() + "HitTest.csh")});
+  auto const hitTestOutput = ShaderStorage(sizeof(HitTestOutputData));
+  hitTestOutput.bindAt(hitTestOutputBufferIndex);
+
+  // Initialise voxels.
+  auto const worldSize = 1_z << worldLevels;
+  auto const noiseSize = 1_z << noiseLevels;
+  auto treeBuffer = initTreeBuffer(mainShader, dynamicMode, maxNodes, worldSize, maxHeight);
+  treeBuffer.bindAt(treeBufferIndex);
+
+  // Initialise noise.
+  auto noiseImage = Bitmap(noiseSize, noiseSize, 4);
   for (size_t x = 0; x < noiseSize; x++)
     for (size_t y = 0; y < noiseSize; y++) {
       noiseImage.at(x, y, 2) = noiseImage.at(x, y, 0) = rand() % 256;
       noiseImage.at(x, y, 3) = noiseImage.at(x, y, 1) = rand() % 256;
     }
-  Texture noiseTexture(noiseImage, 0);
+  auto const noiseTexture = Texture(noiseImage, 0);
+  noiseTexture.bindAt(noiseTextureIndex);
 
-  // Init noise bounds.
-  Bitmap maxImage(noiseSize, noiseSize, 4);
-  Bitmap minImage(noiseSize, noiseSize, 4);
+  // Initialise noise bounds.
+  auto maxImage = Bitmap(noiseSize, noiseSize, 4);
+  auto minImage = Bitmap(noiseSize, noiseSize, 4);
   for (size_t x = 0; x < noiseSize; x++)
     for (size_t y = 0; y < noiseSize; y++) {
       size_t x1 = (x + 1) % noiseSize, y1 = (y + 1) % noiseSize;
@@ -165,205 +224,66 @@ int main() {
         noiseImage.at(x1, y1, 0),
       });
     }
-  Texture maxTexture = loadNoiseMipmaps(maxImage, true);
-  Texture minTexture = loadNoiseMipmaps(minImage, false);
+  auto const maxTexture = Texture(loadNoiseMipmaps(maxImage, true));
+  maxTexture.bindAt(maxTextureIndex);
+  auto const minTexture = Texture(loadNoiseMipmaps(minImage, false));
+  minTexture.bindAt(minTextureIndex);
 
-  // Init framebuffers.
-  std::array<FrameBuffer, 3> fbo = {
-    FrameBuffer(window.width(), window.height(), 1, false),
-    FrameBuffer(window.width(), window.height(), 1, false),
-    FrameBuffer(window.width(), window.height(), 1, false),
-  };
+  // Initialise (empty) frame textures.
+  auto frameWidth = 0_z, frameHeight = 0_z, frameSize = 0_z;
+  auto frames = std::array<Texture, numFrames>();
+  for (auto i = 0_z; i < numFrames; i++) {
+    frames[i].bindAt(frameTextureIndices[i]);
+    glBindImageTexture(frameImageIndices[i], frames[i].handle(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+  }
+  auto quad = VertexBuffer(fullscreenQuad(0.0f, 0.0f, 0.0f), true);
 
-  Camera camera;
+  // Camera parameters.
+  auto camera = Camera();
+  camera.fov = fov;
+  camera.aspect = 1.0f; // Updated per frame.
+  camera.near = 0.1f;
+  camera.far = 256.0f;
+  camera.position.x = static_cast<float>(worldSize) * rand() / (RAND_MAX + 1.0f);
+  camera.position.y = static_cast<float>(worldSize) + 2.0f;
+  camera.position.z = static_cast<float>(worldSize) * rand() / (RAND_MAX + 1.0f);
+
+  auto cameraUpdateScheduler = UpdateScheduler(30.0);
+  auto cameraVelocity = Vec3f(0);
+  auto cameraAccY = 0.0f;
+  auto cameraOnGround = false;
+  auto cameraFlying = false;
+  auto cameraCrossWall = false;
+
+  auto frameCounterScheduler = UpdateScheduler(1.0);
+  auto frameCounter = 0_z;
+
+  auto startTime = UpdateScheduler::timeFromEpoch();
+  auto pathTracing = false;
+  auto curr = 0u;
   window.setMouseLocked(true);
 
-  UpdateScheduler frameCounterScheduler(1.0);
-  size_t frameCounter = 0;
-  double startTime = UpdateScheduler::timeFromEpoch();
-
-  bool pathTracing = false;
-
+  // Main loop.
   while (!window.shouldQuit()) {
-    window.swapBuffers();
-    gl.checkError();
-
-    // Swap and resize framebuffers.
-    if (pathTracing) {
-      std::swap(fbo[0], fbo[1]);
-      fbo[1].bindColorTextureAt(0, prevFrameTextureIndex);
-    } else {
-      auto const width = window.width(), height = window.height();
-      if (fbo[0].width() != width || fbo[0].height() != height) {
-        fbo[0] = FrameBuffer(width, height, 1, false);
-        fbo[1] = FrameBuffer(width, height, 1, false);
-        fbo[2] = FrameBuffer(width, height, 1, false);
-      }
-    }
-    auto const width = fbo[0].width(), height = fbo[0].height();
-
-    // Init shaders.
-    noiseTexture.bindAt(noiseTextureIndex);
-    maxTexture.bindAt(maxTextureIndex);
-    minTexture.bindAt(minTextureIndex);
-    mainShader.use();
-    // See: https://en.cppreference.com/w/cpp/language/lifetime
-    // mainShader.uniformMat4("ProjectionMatrix", camera.getProjectionMatrix().data());
-    // mainShader.uniformMat4("ModelViewMatrix", camera.getModelViewMatrix().data());
-    mainShader.uniformMat4("ProjectionInverse", camera.getProjectionMatrix().inverted().data());
-    mainShader.uniformMat4("ModelViewInverse", camera.getModelViewMatrix().inverted().data());
-    mainShader.uniformVec3("CameraPosition", camera.position().x, camera.position().y, camera.position().z);
-    mainShader.uniformFloat("RandomSeed", static_cast<float>(UpdateScheduler::timeFromEpoch() - startTime));
-    mainShader.uniformBool("PathTracing", pathTracing);
-    mainShader.uniformBool("ProfilerOn", Window::isKeyPressed(SDL_SCANCODE_M));
-    // mainShader.uniformFloat("Time", static_cast<float>(UpdateScheduler::timeFromEpoch() - startTime));
-    mainShader.uniformSampler("PrevFrame", prevFrameTextureIndex);
-    mainShader.uniformSampler("NoiseTexture", noiseTextureIndex);
-    mainShader.uniformSampler("MaxTexture", maxTextureIndex);
-    mainShader.uniformSampler("MinTexture", minTextureIndex);
-    mainShader.uniformSampler("BeamTexture", beamTextureIndex);
-    mainShader.uniformUInt("SampleCount", frameCounter);
-    mainShader.uniformUInt("FrameWidth", width);
-    mainShader.uniformUInt("FrameHeight", height);
-    mainShader.uniformBool("DynamicMode", dynamicMode);
-    mainShader.uniformUInt("MaxNodes", maxNodes);
-    mainShader.uniformUInt("MaxLevels", worldLevels);
-    mainShader.uniformUInt("NoiseLevels", noiseLevels);
-    mainShader.uniformUInt("PartialLevels", partialLevels);
-    mainShader.uniformImage("FrameBuffer", outImageIndex);
-
-    // Coarse passes (beam optimization.)
-    // size_t beamSize = std::max(patchWidth, patchHeight);
-    mainShader.uniformBool("BeamMode", true);
-    mainShader.uniformUInt("PrevBeamSize", 0); // Initialize.
-    size_t beamSize = 64;                      // TODO?
-    while (beamSize >= 4) {
-      auto const btexWidth = width / beamSize + 1, btexHeight = height / beamSize + 1;
-      mainShader.uniformUInt("CurrBeamSize", beamSize);
-      fbo[2].bindColorTextureAt(0, beamTextureIndex);
-      glBindImageTexture(outImageIndex, fbo[0].colorTextures().at(0), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-      glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-      glDispatchCompute((btexWidth - 1) / patchWidth + 1, (btexHeight - 1) / patchHeight + 1, 1);
-      mainShader.uniformUInt("PrevBeamSize", beamSize);
-      beamSize /= 4;
-      swap(fbo[0], fbo[2]);
-    }
-
-    // Render scene (sample once for each pixel.)
-    mainShader.uniformBool("BeamMode", false);
-    mainShader.uniformUInt("CurrBeamSize", 1);
-    fbo[2].bindColorTextureAt(0, beamTextureIndex);
-    glBindImageTexture(outImageIndex, fbo[0].colorTextures().at(0), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-    glDispatchCompute((width - 1) / patchWidth + 1, (height - 1) / patchHeight + 1, 1);
-
-    gl.setDrawArea(0, 0, window.width(), window.height());
-    gl.clear();
-
-    // Present to screen.
-    basicShader.use();
-    basicShader.uniformSampler("Texture2D", prevFrameTextureIndex);
-    basicShader.uniformBool("Texture2DEnabled", true);
-    basicShader.uniformBool("ColorEnabled", false);
-    basicShader.uniformBool("GammaCorrection", true);
-    fbo[0].bindColorTextureAt(0, prevFrameTextureIndex);
-    // See: https://www.khronos.org/opengl/wiki/Memory_Model#External_visibility
-    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
-    auto wfrac = static_cast<float>(width) / static_cast<float>(fbo[0].size());
-    auto hfrac = static_cast<float>(height) / static_cast<float>(fbo[0].size());
-    VertexBuffer(VertexArray(VertexLayout(OpenGL::triangleStrip, 2, 2))
-                   .texCoords({0.0f, hfrac})
-                   .vertex({-1.0f, 1.0f})
-                   .texCoords({0.0f, 0.0f})
-                   .vertex({-1.0f, -1.0f})
-                   .texCoords({wfrac, hfrac})
-                   .vertex({1.0f, 1.0f})
-                   .texCoords({wfrac, 0.0f})
-                   .vertex({1.0f, -1.0f}))
-      .draw();
-
-    // Update FPS
-    frameCounter++;
-    frameCounterScheduler.refresh();
-    while (!frameCounterScheduler.inSync()) {
-      // Count nodes.
-      uint32_t count = 0;
-      outBuffer.download(sizeof(count), &count);
-      // Update window title.
-      std::stringstream ss;
-      ss << "Voxel Raycasting Test (";
-      if (dynamicMode) {
-        ss << count << " (" << static_cast<size_t>(count) * 100 / maxNodes << "%) nodes dynamic";
-      } else {
-        ss << count << " nodes static";
-      }
-      if (pathTracing) {
-        ss << ", " << frameCounter << " samples per pixel";
-      } else {
-        ss << ", FPS: " << frameCounter << ", X: " << camera.position().x << ", Y: " << camera.position().y
-           << ", Z: " << camera.position().z;
-        frameCounter = 0;
-      }
-      ss << ")";
-      Window::singleton().setTitle(ss.str());
-      frameCounterScheduler.increase();
-    }
     window.pollEvents();
 
-    // Screenshot
-    static bool opressed = false;
-    if (Window::isKeyPressed(SDL_SCANCODE_O)) {
-      if (!opressed) {
-        if (pathTracing) {
-          // Read data.
-          Bitmap bmp(width, height, 3);
-          fbo[0].bindBufferForRead(0);
-          glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, bmp.data());
-          fbo[0].unbindBuffers();
-          // gamma correction.
-          for (size_t i = 0; i < bmp.height(); i++)
-            for (size_t j = 0; j < bmp.width(); j++) {
-              for (size_t k = 0; k < bmp.bytesPerPixel(); k++) {
-                double col = bmp.at(j, i, k) / 255.0;
-                col = pow(col, 1.0 / gamma);
-                bmp.at(j, i, k) = static_cast<uint8_t>(col * 255.0);
-              }
-            }
-          // Save file.
-          std::stringstream ss;
-          ss << ScreenshotPath << width << "x" << height << "-" << frameCounter << "spp-"
-             << UpdateScheduler::timeFromEpoch() - startTime << "s.bmp";
-          bmp.swapChannels(0, 2);
-          bmp.save(ss.str());
-          Log::info("Saved screenshot `" + ss.str() + "`.");
-        }
-      }
-      opressed = true;
-    } else opressed = false;
+    // =====================
+    // Handle window events.
+    // =====================
 
-    // Switches
     static bool lpressed = false;
-    if (Window::isKeyPressed(SDL_SCANCODE_L)) {
+    if (window.isKeyPressed(SDL_SCANCODE_L)) {
       if (!lpressed) window.setMouseLocked(!window.mouseLocked());
       lpressed = true;
     } else {
       lpressed = false;
     }
 
-    static bool upressed = false;
-    if (Window::isKeyPressed(SDL_SCANCODE_U)) {
-      if (!upressed) window.setFullscreen(!window.fullscreen());
-      upressed = true;
-    } else {
-      upressed = false;
-    }
-
     static bool ppressed = false;
-    if (Window::isKeyPressed(SDL_SCANCODE_P)) {
+    if (window.isKeyPressed(SDL_SCANCODE_P)) {
       if (!ppressed) {
         pathTracing = !pathTracing;
-        if (pathTracing) enablePathTracing(window, fbo);
-        else disablePathTracing(window, fbo);
+        window.setMouseLocked(!pathTracing);
         frameCounter = 0;
       }
       ppressed = true;
@@ -372,10 +292,10 @@ int main() {
     }
 
     static bool cpressed = false;
-    if (Window::isKeyPressed(SDL_SCANCODE_C)) {
+    if (window.isKeyPressed(SDL_SCANCODE_C)) {
       if (!cpressed) {
-        Tree curr(1, 1);
-        curr.download(ssbo);
+        auto curr = Tree(1, 1);
+        curr.download(treeBuffer);
         curr.check();
       }
       cpressed = true;
@@ -384,26 +304,235 @@ int main() {
     }
 
     static bool gpressed = false;
-    if (Window::isKeyPressed(SDL_SCANCODE_G)) {
+    if (window.isKeyPressed(SDL_SCANCODE_G)) {
       if (!gpressed) {
-        Tree curr(1, 1), opt(1, 1);
-        curr.download(ssbo);
+        auto curr = Tree(1, 1), opt = Tree(1, 1);
+        curr.download(treeBuffer);
         curr.gc(opt);
-        opt.upload(ssbo, false);
+        opt.upload(treeBuffer);
       }
       gpressed = true;
     } else {
       gpressed = false;
     }
 
-    // Camera parameters.
-    auto aspect = static_cast<float>(width) / static_cast<float>(height);
-    camera.setPerspective(70.0f, aspect, 0.1f, 256.0f);
-    if (!pathTracing) camera.update(window);
+    static bool f1pressed = false;
+    if (window.isKeyPressed(SDL_SCANCODE_F1)) {
+      if (!f1pressed) cameraFlying = !cameraFlying;
+      f1pressed = true;
+    } else {
+      f1pressed = false;
+    }
 
-    if (Window::isKeyPressed(SDL_SCANCODE_ESCAPE)) break;
+    static bool f2pressed = false;
+    if (window.isKeyPressed(SDL_SCANCODE_F2)) {
+      if (!f2pressed) window.setFullscreen(!window.fullscreen());
+      f2pressed = true;
+    } else {
+      f2pressed = false;
+    }
+
+    static bool f4pressed = false;
+    if (window.isKeyPressed(SDL_SCANCODE_F4)) {
+      if (!f4pressed) cameraCrossWall = !cameraCrossWall;
+      f4pressed = true;
+    } else {
+      f4pressed = false;
+    }
+
+    // Screenshot.
+    /*
+    static bool opressed = false;
+    if (window.isKeyPressed(SDL_SCANCODE_O)) {
+      if (!opressed) {
+        if (pathTracing) {
+          // Read pixel data.
+          auto bmp = Bitmap(frameWidth, frameHeight, 3);
+          Texture::select(frameTextureIndices.back());
+          glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, bmp.data());
+          // Gamma conversion.
+          auto const gamma = 2.2;
+          for (auto i = 0_z; i < bmp.height(); i++)
+            for (auto j = 0_z; j < bmp.width(); j++) {
+              for (auto k = 0_z; k < bmp.bytesPerPixel(); k++) {
+                auto col = bmp.at(j, i, k) / 255.0;
+                col = pow(col, 1.0 / gamma);
+                bmp.at(j, i, k) = static_cast<uint8_t>(col * 255.0);
+              }
+            }
+          // Save file.
+          std::stringstream ss;
+          ss << screenshotPath() << frameWidth << "x" << frameHeight << "-" << frameCounter << "spp-"
+             << UpdateScheduler::timeFromEpoch() - startTime << "s.bmp";
+          bmp.swapChannels(0, 2);
+          bmp.save(ss.str());
+          Log::info("Saved screenshot `" + ss.str() + "`.");
+        }
+      }
+      opressed = true;
+    } else opressed = false;
+    */
+
+    // Update camera.
+    if (!pathTracing) {
+      updateCameraFrame(window, camera);
+      cameraUpdateScheduler.refresh();
+      while (!cameraUpdateScheduler.inSync()) {
+        updateCameraInterval(
+          window,
+          camera,
+          cameraVelocity,
+          cameraAccY,
+          cameraOnGround,
+          cameraFlying || cameraCrossWall
+        );
+        if (!cameraCrossWall) {
+          // Invoke the hit test program.
+          auto const boxMin = camera.position - Vec3f(0.3f, 1.5f, 0.3f);
+          auto const boxMax = camera.position + Vec3f(0.3f, 0.2f, 0.3f);
+          hitTestShader.use();
+          hitTestShader.uniformUInt("MaxLevels", worldLevels);
+          hitTestShader.uniformVec3("BoxMin", boxMin.x, boxMin.y, boxMin.z);
+          hitTestShader.uniformVec3("BoxMax", boxMax.x, boxMax.y, boxMax.z);
+          hitTestShader.uniformVec3("Velocity", cameraVelocity.x, cameraVelocity.y, cameraVelocity.z);
+          // glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+          glDispatchCompute(1, 1, 1);
+          glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
+          auto data = HitTestOutputData();
+          hitTestOutput.download(0, sizeof(HitTestOutputData), &data);
+          cameraVelocity = Vec3f(data.velocity[0], data.velocity[1], data.velocity[2]);
+          cameraOnGround = data.onGround;
+        }
+        cameraUpdateScheduler.increase();
+      }
+    } else {
+      cameraUpdateScheduler.sync();
+    }
+
+    // Update FPS.
+    frameCounter++;
+    frameCounterScheduler.refresh();
+    while (!frameCounterScheduler.inSync()) {
+      // Count nodes.
+      glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
+      auto data = MainOutputData();
+      mainOutput.download(0, sizeof(MainOutputData), &data);
+      // Update window title.
+      std::stringstream ss;
+      ss << "Voxel Raycasting Test (";
+      if (dynamicMode) {
+        ss << data.count << " (" << static_cast<size_t>(data.count) * 100 / maxNodes << "%) nodes dynamic";
+      } else {
+        ss << data.count << " nodes static";
+      }
+      if (pathTracing) {
+        ss << ", " << frameCounter << " samples per pixel";
+      } else {
+        ss << ", FPS: " << frameCounter << ", X: " << camera.position.x << ", Y: " << camera.position.y
+           << ", Z: " << camera.position.z;
+        frameCounter = 0;
+      }
+      ss << ")";
+      Window::singleton().setTitle(ss.str());
+      frameCounterScheduler.increase();
+    }
+
+    // Exit program if ESC is pressed.
+    if (window.isKeyPressed(SDL_SCANCODE_ESCAPE)) break;
+
+    // =============
+    // Render frame.
+    // =============
+
+    // Check if frame textures should be resized.
+    if (!pathTracing) {
+      auto const width = renderWidth > 0 ? renderWidth : window.width();
+      auto const height = renderHeight > 0 ? renderHeight : window.height();
+      if (frameWidth != width || frameHeight != height) {
+        frameWidth = width;
+        frameHeight = height;
+        frameSize = 1_z << ceilLog2(std::max(width, height));
+        for (auto i = 0_z; i < numFrames; i++) {
+          frames[i].reallocate(frameSize / beamSizes[i], OpenGL::internalFormat4f);
+        }
+        quad = VertexBuffer(
+          fullscreenQuad(
+            static_cast<float>(frameWidth),
+            static_cast<float>(frameHeight),
+            static_cast<float>(frameSize)
+          ),
+          true
+        );
+        camera.aspect = static_cast<float>(frameWidth) / static_cast<float>(frameHeight);
+      }
+    }
+
+    auto interp = camera;
+    interp.position += cameraVelocity * static_cast<float>(std::min(cameraUpdateScheduler.delta(), 1.0));
+
+    // Initialise shaders.
+    mainShader.use();
+    mainShader.uniformSamplers("FrameTexture", numFrames, frameTextureIndices.data());
+    mainShader.uniformSampler("NoiseTexture", noiseTextureIndex);
+    mainShader.uniformSampler("MaxTexture", maxTextureIndex);
+    mainShader.uniformSampler("MinTexture", minTextureIndex);
+
+    mainShader.uniformUInt("FrameWidth", frameWidth);
+    mainShader.uniformUInt("FrameHeight", frameHeight);
+    mainShader.uniformBool("PathTracing", pathTracing);
+    mainShader.uniformBool("ProfilerOn", window.isKeyPressed(SDL_SCANCODE_M));
+
+    // See: https://en.cppreference.com/w/cpp/language/lifetime
+    // mainShader.uniformMat4("ProjectionMatrix", interp.projection().data());
+    // mainShader.uniformMat4("ModelViewMatrix", interp.modelView().data());
+    mainShader.uniformMat4("ProjectionInverse", interp.projection().inverted().data());
+    mainShader.uniformMat4("ModelViewInverse", interp.modelView().inverted().data());
+    mainShader.uniformVec3("CameraPosition", interp.position.x, interp.position.y, interp.position.z);
+    mainShader.uniformFloat("CameraFov", interp.fov * 3.14159265f / 180.0f);
+    // mainShader.uniformFloat("Time", static_cast<float>(UpdateScheduler::timeFromEpoch() - startTime));
+    mainShader.uniformFloat("RandomSeed", static_cast<float>(UpdateScheduler::timeFromEpoch() - startTime));
+
+    mainShader.uniformBool("DynamicMode", dynamicMode);
+    mainShader.uniformUInt("MaxNodes", maxNodes);
+    mainShader.uniformUInt("MaxLevels", worldLevels);
+    mainShader.uniformUInt("NoiseLevels", noiseLevels);
+    mainShader.uniformUInt("PartialLevels", partialLevels);
+    mainShader.uniformFloat("LodQuality", lodQuality);
+    mainShader.uniformImages("FrameImage", numFrames, frameImageIndices.data());
+
+    // See: https://www.khronos.org/opengl/wiki/Memory_Model#External_visibility
+    auto barriers = GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT;
+
+    // Render scene, coarse to fine.
+    mainShader.uniformUInt("PrevBeamSize", 1u); // Initialise.
+    for (auto i = 0_z; i < numFrames; i++) {
+      auto const beamSize = beamSizes[i];
+      auto const currWidth = frameWidth / beamSize + 1;
+      auto const currHeight = frameHeight / beamSize + 1;
+      mainShader.uniformUInt("CurrBeamSize", beamSize);
+      mainShader.uniformUInt("CurrFrameIndex", i);
+      glMemoryBarrier(barriers);
+      glDispatchCompute((currWidth - 1) / workgroupWidth + 1, (currHeight - 1) / workgroupHeight + 1, 1);
+      mainShader.uniformUInt("PrevBeamSize", beamSize);
+      mainShader.uniformUInt("PrevFrameIndex", i);
+    }
+
+    gl.setDrawArea(0, 0, window.width(), window.height());
+    gl.clear();
+
+    // Present to screen.
+    basicShader.use();
+    basicShader.uniformSampler("Texture2D", frameTextureIndices.back());
+    basicShader.uniformBool("Texture2DEnabled", true);
+    basicShader.uniformBool("ColorEnabled", false);
+    basicShader.uniformBool("GammaConversion", true);
+    glMemoryBarrier(barriers);
+    quad.draw();
+
+    window.swapBuffers();
+    gl.checkError();
   }
 
-  config.save();
+  config.save(configPath() + configFilename());
   return 0;
 }

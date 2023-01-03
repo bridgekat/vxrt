@@ -10,8 +10,9 @@
 
 class Texture {
 public:
+  Texture();
+  Texture(size_t size, OpenGL::InternalFormat internalFormat): Texture() { reallocate(size, internalFormat); }
   Texture(Bitmap const& image, size_t levels = static_cast<size_t>(-1));
-  Texture(OpenGL::Object handle): mHandle(handle) {}
   Texture(Texture&& r) noexcept: mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
   Texture& operator=(Texture&& r) noexcept {
     swap(*this, r);
@@ -26,15 +27,22 @@ public:
 
   OpenGL::Object handle() const { return mHandle; }
 
+  GLint push() const {
+    GLint prev;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+    glBindTexture(GL_TEXTURE_2D, mHandle);
+    return prev;
+  }
+  static void pop(GLint prev) { glBindTexture(GL_TEXTURE_2D, prev); }
+  static void select(size_t index) { glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + index)); }
+
   void bindAt(size_t index) const {
     glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + index));
     glBindTexture(GL_TEXTURE_2D, mHandle);
   }
 
-  static void unbindAt(size_t index) {
-    glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + index));
-    glBindTexture(GL_TEXTURE_2D, OpenGL::null);
-  }
+  // Invalidates existing and allocates new storage.
+  void reallocate(size_t size, OpenGL::InternalFormat internalFormat);
 
   static size_t maxSize() {
     GLint res;

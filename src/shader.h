@@ -10,21 +10,21 @@
 class ShaderStage {
 public:
   ShaderStage(OpenGL::ShaderStage stage, std::string const& filename);
-  ShaderStage(ShaderStage&& r) noexcept: mStage(r.mStage), mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
-  ShaderStage& operator=(ShaderStage&& r) noexcept {
+  ShaderStage(ShaderStage&& r): mStage(r.mStage), mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
+  ShaderStage& operator=(ShaderStage&& r) {
     swap(*this, r);
     return *this;
   }
   ~ShaderStage();
 
-  friend void swap(ShaderStage& l, ShaderStage& r) noexcept {
+  friend void swap(ShaderStage& l, ShaderStage& r) {
     using std::swap;
     swap(l.mStage, r.mStage);
     swap(l.mHandle, r.mHandle);
   }
 
-  OpenGL::ShaderStage stage() const noexcept { return mStage; }
-  OpenGL::Object handle() const noexcept { return mHandle; }
+  OpenGL::ShaderStage stage() const { return mStage; }
+  OpenGL::Object handle() const { return mHandle; }
 
 private:
   OpenGL::ShaderStage mStage;
@@ -37,37 +37,37 @@ static_assert(std::assignable_from<ShaderStage&, ShaderStage&&>);
 class ShaderProgram {
 public:
   ShaderProgram(std::initializer_list<ShaderStage> stages);
-  ShaderProgram(ShaderProgram&& r) noexcept: mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
-  ShaderProgram& operator=(ShaderProgram&& r) noexcept {
+  ShaderProgram(ShaderProgram&& r): mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
+  ShaderProgram& operator=(ShaderProgram&& r) {
     swap(*this, r);
     return *this;
   }
   ~ShaderProgram();
 
-  friend void swap(ShaderProgram& l, ShaderProgram& r) noexcept {
+  friend void swap(ShaderProgram& l, ShaderProgram& r) {
     using std::swap;
     swap(l.mHandle, r.mHandle);
   }
 
-  OpenGL::Object handle() const noexcept { return mHandle; }
-  OpenGL::UniformLocation uniformLocation(std::string const& name) const noexcept;
+  OpenGL::Object handle() const { return mHandle; }
+  OpenGL::UniformLocation uniformLocation(std::string const& name) const;
 
   // `-1`s in uniform locations are silently ignored.
   // See: https://registry.khronos.org/OpenGL-Refpages/gl4/html/glUniform.xhtml
 #define L uniformLocation
   // clang-format off
-  void uniformInt(std::string const& name, GLint value) const noexcept { glUniform1i(L(name), value); }
-  void uniformUInt(std::string const& name, GLuint value) const noexcept { glUniform1ui(L(name), value); }
-  void uniformBool(std::string const& name, bool value) const noexcept { glUniform1i(L(name), value ? 1 : 0); }
-  void uniformSampler(std::string const& name, GLint index) const noexcept { glUniform1i(L(name), index); }
-  void uniformSamplers(std::string const& name, size_t count, GLint const* indices) const noexcept { glUniform1iv(L(name), count, indices); }
-  void uniformImage(std::string const& name, GLint index) const noexcept { glUniform1i(L(name), index); }
-  void uniformImages(std::string const& name, size_t count, GLint const* indices) const noexcept { glUniform1iv(L(name), count, indices); }
-  void uniformFloat(std::string const& name, GLfloat x) const noexcept { glUniform1f(L(name), x); }
-  void uniformVec2(std::string const& name, GLfloat x, GLfloat y) const noexcept { glUniform2f(L(name), x, y); }
-  void uniformVec3(std::string const& name, GLfloat x, GLfloat y, GLfloat z) const noexcept { glUniform3f(L(name), x, y, z); }
-  void uniformVec4(std::string const& name, GLfloat x, GLfloat y, GLfloat z, GLfloat w) const noexcept { glUniform4f(L(name), x, y, z, w); }
-  void uniformMat4(std::string const& name, GLfloat const* p, bool transpose = true) const noexcept { glUniformMatrix4fv(L(name), 1, transpose ? GL_TRUE : GL_FALSE, p); }
+  void uniformInt(std::string const& name, GLint value) const  { glUniform1i(L(name), value); }
+  void uniformUInt(std::string const& name, GLuint value) const  { glUniform1ui(L(name), value); }
+  void uniformBool(std::string const& name, bool value) const  { glUniform1i(L(name), value ? 1 : 0); }
+  void uniformSampler(std::string const& name, GLint index) const  { glUniform1i(L(name), index); }
+  void uniformSamplers(std::string const& name, size_t count, GLint const* indices) const  { glUniform1iv(L(name), count, indices); }
+  void uniformImage(std::string const& name, GLint index) const  { glUniform1i(L(name), index); }
+  void uniformImages(std::string const& name, size_t count, GLint const* indices) const  { glUniform1iv(L(name), count, indices); }
+  void uniformFloat(std::string const& name, GLfloat x) const  { glUniform1f(L(name), x); }
+  void uniformVec2(std::string const& name, GLfloat x, GLfloat y) const  { glUniform2f(L(name), x, y); }
+  void uniformVec3(std::string const& name, GLfloat x, GLfloat y, GLfloat z) const  { glUniform3f(L(name), x, y, z); }
+  void uniformVec4(std::string const& name, GLfloat x, GLfloat y, GLfloat z, GLfloat w) const  { glUniform4f(L(name), x, y, z, w); }
+  void uniformMat4(std::string const& name, GLfloat const* p, bool transpose = true) const  { glUniformMatrix4fv(L(name), 1, transpose ? GL_TRUE : GL_FALSE, p); }
   // clang-format on
 #undef L
 

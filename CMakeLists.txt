@@ -1,4 +1,5 @@
-cmake_minimum_required (VERSION 3.12...3.22)
+cmake_minimum_required (VERSION 3.12)
+cmake_policy (SET CMP0135 NEW)
 
 project (vxrt VERSION 0.1 LANGUAGES CXX)
 
@@ -40,7 +41,7 @@ if (VXRT_ENABLE_CODE_ANALYSIS)
   endif ()
 endif ()
 
-# Set default compile options
+# Set default compile options.
 macro (target_default_compile_options TARGET)
   target_compile_features     (${TARGET} PRIVATE cxx_std_20)
   set_target_properties       (${TARGET} PROPERTIES CXX_EXTENSIONS OFF)
@@ -100,7 +101,7 @@ find_package (OpenGL REQUIRED)
 find_package (GLEW REQUIRED)
 find_package (SDL2 REQUIRED)
 
-# Add targets
+# Add targets.
 aux_source_directory (./src/ SOURCES)
 add_executable                  (vxrt ${SOURCES})
 target_default_compile_options  (vxrt)

@@ -9,48 +9,48 @@
 #include "vec.h"
 
 template <typename T, size_t N>
-class BasicMatrixRow {
+class BasicMatRow {
 public:
   T* p;
-  T& operator[](size_t index) const noexcept {
+  T& operator[](size_t index) const {
     assert(index < N);
     return p[index];
   }
 };
 
 template <typename T, size_t M, size_t N>
-class BasicMatrix {
+class BasicMat {
 public:
-  BasicMatrix() noexcept { std::fill(mData.begin(), mData.end(), 0); }
-  BasicMatrix(BasicMatrix const& r) noexcept { std::copy(r.mData.begin(), r.mData.end(), mData.begin()); }
+  BasicMat() { std::fill(mData.begin(), mData.end(), 0); }
+  BasicMat(BasicMat const& r) { std::copy(r.mData.begin(), r.mData.end(), mData.begin()); }
 
-  T* data() noexcept { return mData.data(); }
-  T const* data() const noexcept { return mData.data(); }
+  T* data() { return mData.data(); }
+  T const* data() const { return mData.data(); }
 
-  BasicMatrixRow<T, N> operator[](size_t index) noexcept {
+  BasicMatRow<T, N> operator[](size_t index) {
     assert(index < M);
-    return BasicMatrixRow<T, N>{data() + index * N};
+    return BasicMatRow<T, N>{data() + index * N};
   }
 
-  BasicMatrixRow<T const, N> operator[](size_t index) const noexcept {
+  BasicMatRow<T const, N> operator[](size_t index) const {
     assert(index < M);
-    return BasicMatrixRow<T const, N>{data() + index * N};
+    return BasicMatRow<T const, N>{data() + index * N};
   }
 
-  BasicMatrix operator+(BasicMatrix const& r) const {
+  BasicMat operator+(BasicMat const& r) const {
     auto res = *this;
     res += r;
     return res;
   }
 
-  BasicMatrix& operator+=(BasicMatrix const& r) {
+  BasicMat& operator+=(BasicMat const& r) {
     for (size_t i = 0; i < M; i++) {
       for (size_t j = 0; j < N; j++) (*this)[i][i] += r[i][i];
     }
     return *this;
   }
 
-  BasicMatrix& operator*=(BasicMatrix<T, N, N> const& r) {
+  BasicMat& operator*=(BasicMat<T, N, N> const& r) {
     *this = *this * r;
     return *this;
   }
@@ -75,8 +75,8 @@ private:
 };
 
 template <typename T, size_t M, size_t K, size_t N>
-BasicMatrix<T, M, N> operator*(BasicMatrix<T, M, K> const& l, BasicMatrix<T, K, N> const& r) {
-  BasicMatrix<T, M, N> res;
+BasicMat<T, M, N> operator*(BasicMat<T, M, K> const& l, BasicMat<T, K, N> const& r) {
+  BasicMat<T, M, N> res;
   for (size_t i = 0; i < M; i++) {
     for (size_t k = 0; k < K; k++) {
       for (size_t j = 0; j < N; j++) res[i][j] += l[i][k] * r[k][j];
@@ -87,36 +87,36 @@ BasicMatrix<T, M, N> operator*(BasicMatrix<T, M, K> const& l, BasicMatrix<T, K, 
 
 // Specialization for square matrices.
 template <typename T, size_t N>
-class SquareMatrix: public BasicMatrix<T, N, N> {
+class SquareMat: public BasicMat<T, N, N> {
 public:
-  using BasicMatrix<T, N, N>::BasicMatrix;
+  using BasicMat<T, N, N>::BasicMat;
 
   // Identity matrix constructor.
-  SquareMatrix(T value) noexcept {
+  SquareMat(T value) {
     for (size_t i = 0; i < N; i++) (*this)[i][i] = value;
   }
 
-  SquareMatrix& transpose() {
+  SquareMat& transpose() {
     for (size_t i = 0; i < N; i++) {
       for (size_t j = i + 1; j < N; j++) std::swap((*this)[i][j], (*this)[j][i]);
     }
     return *this;
   }
 
-  SquareMatrix transposed() const {
+  SquareMat transposed() const {
     auto res = *this;
     res.transpose();
     return res;
   }
 
-  SquareMatrix& invert() {
+  SquareMat& invert() {
     *this = inverted();
     return *this;
   }
 
-  SquareMatrix inverted() const {
+  SquareMat inverted() const {
     // Gauss-Jordan with partial pivoting.
-    auto t = *this, res = SquareMatrix(1);
+    auto t = *this, res = SquareMat(1);
     for (size_t i = 0; i < N; i++) {
       size_t p = i;
       for (size_t j = i + 1; j < N; j++) {
@@ -141,14 +141,14 @@ public:
 
 // Specialization for 4x4 matrices.
 template <typename T>
-class Matrix4: public SquareMatrix<T, 4> {
+class Mat4: public SquareMat<T, 4> {
 public:
   static constexpr double Pi = 3.1415926535897932;
-  using SquareMatrix<T, 4>::SquareMatrix;
+  using SquareMat<T, 4>::SquareMat;
 
   // Returns a translation matrix.
-  static Matrix4 translation(const Vec3<T>& delta) {
-    Matrix4 res(1);
+  static Mat4 translation(const Vec3<T>& delta) {
+    Mat4 res(1);
     res[0][3] = delta.x;
     res[1][3] = delta.y;
     res[2][3] = delta.z;
@@ -156,8 +156,8 @@ public:
   }
 
   // Returns a rotation matrix.
-  static Matrix4 rotation(T degrees, Vec3<T> vec) {
-    Matrix4 res;
+  static Mat4 rotation(T degrees, Vec3<T> vec) {
+    Mat4 res;
     vec.normalize();
     T alpha = degrees * T(Pi) / T(180), s = sin(alpha), c = cos(alpha), t = T(1) - c;
     res[0][0] = t * vec.x * vec.x + c;
@@ -174,8 +174,8 @@ public:
   }
 
   // Returns a perspective projection matrix.
-  static Matrix4 perspective(T fov, T aspect, T zNear, T zFar) {
-    Matrix4 res;
+  static Mat4 perspective(T fov, T aspect, T zNear, T zFar) {
+    Mat4 res;
     T f = T(1) / tan(fov * T(Pi) / T(180) / T(2));
     T a = zNear - zFar;
     res[0][0] = f / aspect;
@@ -187,11 +187,11 @@ public:
   }
 
   // Returns an orthogonal projection matrix.
-  static Matrix4 ortho(T left, T right, T top, T bottom, T zNear, T zFar) {
+  static Mat4 ortho(T left, T right, T top, T bottom, T zNear, T zFar) {
     T a = right - left;
     T b = top - bottom;
     T c = zFar - zNear;
-    Matrix4 res;
+    Mat4 res;
     res[0][0] = T(2) / a;
     res[1][1] = T(2) / b;
     res[2][2] = T(-2) / c;
@@ -215,8 +215,8 @@ public:
   }
 };
 
-typedef Matrix4<float> Mat4f;
-typedef Matrix4<double> Mat4d;
+typedef Mat4<float> Mat4f;
+typedef Mat4<double> Mat4d;
 
 static_assert(std::copy_constructible<Mat4f>);
 static_assert(std::assignable_from<Mat4f&, Mat4f&>);

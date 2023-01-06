@@ -107,13 +107,14 @@ void Tree::generateNode(size_t ind, int x0, int y0, int z0, int size) {
   mNodes[ind].generated = true;
   if (size == 1) {
     // Generate single block
-    double density = WorldGen::getDensity(x0, y0, z0);
-    mNodes[ind].data = WorldGen::getBlock(x0, y0, z0, mHeightMap[x0 * mSize + z0], density);
+    // double density = WorldGen::getDensity(x0, y0, z0);
+    // mNodes[ind].data = WorldGen::getBlock(x0, y0, z0, mHeightMap[x0 * mSize + z0], density);
+    mNodes[ind].data = y0 < mHeightMap[x0 * mSize + z0] ? 1 : 0;
     mNodes[ind].leaf = true;
     // Count
     mBlocksGenerated++;
     if (mBlocksGenerated % 10000000 == 0) {
-      int percent = mBlocksGenerated * 100 / ((long long) mSize * mSize * mHeight);
+      auto percent = mBlocksGenerated * 100 / (mSize * mSize * mHeight);
       std::stringstream ss;
       ss << mBlocksGenerated << " (" << percent << "%) blocks generated, ";
       ss << mNodes.size() << " nodes used.";

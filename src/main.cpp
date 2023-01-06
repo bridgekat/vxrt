@@ -1,12 +1,15 @@
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <type_traits>
 #include "bitmap.h"
 #include "camera.h"
 #include "config.h"
 #include "framebuffer.h"
 #include "shaderstorage.h"
 #include "texture.h"
+#include "texturearray.h"
 #include "tree.h"
 #include "updatescheduler.h"
 #include "vertexarray.h"
@@ -21,12 +24,16 @@ struct HitTestOutputData {
   bool onGround;
 };
 
-constexpr auto numFrames = 2_z;
-constexpr auto beamSizes = std::array<size_t, numFrames>{4_z, 1_z};
+static_assert(std::is_standard_layout_v<MainOutputData> && std::is_trivially_copyable_v<MainOutputData>);
+static_assert(std::is_standard_layout_v<HitTestOutputData> && std::is_trivially_copyable_v<HitTestOutputData>);
 
-constexpr auto noiseTextureIndex = 0, maxTextureIndex = 1, minTextureIndex = 2;
-constexpr auto frameTextureIndices = std::array<GLint, numFrames>{3, 4};
-constexpr auto frameImageIndices = std::array<GLint, numFrames>{0, 1};
+constexpr auto beamLevels = 1_z;
+constexpr auto beamSizes = std::array<size_t, beamLevels>{4_z};
+constexpr auto beamDepth = 24_z;
+
+constexpr auto frameTextureIndex = 0, noiseTextureIndex = 1, maxTextureIndex = 2, minTextureIndex = 3;
+constexpr auto frameImageIndex = 0;
+constexpr auto beamImageIndices = std::array<GLint, beamLevels>{1};
 constexpr auto treeBufferIndex = 0, mainOutputBufferIndex = 1, hitTestOutputBufferIndex = 2;
 
 auto initTreeBuffer(
@@ -61,13 +68,13 @@ auto loadNoiseMipmaps(Bitmap const& image, bool maximal) -> Texture {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(levels));
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 0);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, static_cast<GLint>(levels));
-  for (auto level = 0_z, scale = 1_z; level <= levels; level++, scale *= 2) {
+  for (auto level = 0_z, scale = 1_z; level <= levels; level++, scale *= 2_z) {
     assert(scale <= size);
     auto curr = Bitmap(size / scale, size / scale, image.bytesPerPixel());
     for (auto i = 0_z; i < size / scale; i++)
       for (auto j = 0_z; j < size / scale; j++)
         for (auto k = 0_z; k < image.bytesPerPixel(); k++) {
-          auto sum = maximal ? uint8_t(0) : uint8_t(255);
+          auto sum = uint8_t(maximal ? 0 : 255);
           for (auto i1 = 0_z; i1 < scale; i1++)
             for (auto j1 = 0_z; j1 < scale; j1++) {
               auto const c = image.at(j * scale + j1, i * scale + i1, k);
@@ -231,10 +238,12 @@ auto main() -> int {
 
   // Initialise (empty) frame textures.
   auto frameWidth = 0_z, frameHeight = 0_z, frameSize = 0_z;
-  auto frames = std::array<Texture, numFrames>();
-  for (auto i = 0_z; i < numFrames; i++) {
-    frames[i].bindAt(frameTextureIndices[i]);
-    glBindImageTexture(frameImageIndices[i], frames[i].handle(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+  auto frame = Texture();
+  frame.bindAt(frameTextureIndex);
+  glBindImageTexture(frameImageIndex, frame.handle(), 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+  auto beams = std::array<TextureArray, beamLevels>();
+  for (auto i = 0_z; i < beamLevels; i++) {
+    glBindImageTexture(beamImageIndices[i], beams[i].handle(), 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
   }
   auto quad = VertexBuffer(fullscreenQuad(0.0f, 0.0f, 0.0f), true);
 
@@ -452,8 +461,9 @@ auto main() -> int {
         frameWidth = width;
         frameHeight = height;
         frameSize = 1_z << ceilLog2(std::max(width, height));
-        for (auto i = 0_z; i < numFrames; i++) {
-          frames[i].reallocate(frameSize / beamSizes[i], OpenGL::internalFormat4f);
+        frame.reallocate(frameSize, OpenGL::internalFormat4f);
+        for (auto i = 0_z; i < beamLevels; i++) {
+          beams[i].reallocate(frameSize / beamSizes[i], beamDepth, OpenGL::internalFormat4f);
         }
         quad = VertexBuffer(
           fullscreenQuad(
@@ -472,7 +482,8 @@ auto main() -> int {
 
     // Initialise shaders.
     mainShader.use();
-    mainShader.uniformSamplers("FrameTexture", numFrames, frameTextureIndices.data());
+    mainShader.uniformImage("FrameImage", frameImageIndex);
+    mainShader.uniformImages("BeamImage", beamLevels, beamImageIndices.data());
     mainShader.uniformSampler("NoiseTexture", noiseTextureIndex);
     mainShader.uniformSampler("MaxTexture", maxTextureIndex);
     mainShader.uniformSampler("MinTexture", minTextureIndex);
@@ -498,31 +509,35 @@ auto main() -> int {
     mainShader.uniformUInt("NoiseLevels", noiseLevels);
     mainShader.uniformUInt("PartialLevels", partialLevels);
     mainShader.uniformFloat("LodQuality", lodQuality);
-    mainShader.uniformImages("FrameImage", numFrames, frameImageIndices.data());
 
     // See: https://www.khronos.org/opengl/wiki/Memory_Model#External_visibility
     auto barriers = GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT;
 
     // Render scene, coarse to fine.
-    mainShader.uniformUInt("PrevBeamSize", 1u); // Initialise.
-    for (auto i = 0_z; i < numFrames; i++) {
+    mainShader.uniformUInt("PrevBeamIndex", beamLevels);
+    mainShader.uniformUInt("PrevBeamSize", 1);
+    for (auto i = 0_z; i < beamLevels; i++) {
       auto const beamSize = beamSizes[i];
       auto const currWidth = frameWidth / beamSize + 1;
       auto const currHeight = frameHeight / beamSize + 1;
+      mainShader.uniformUInt("CurrBeamIndex", i);
       mainShader.uniformUInt("CurrBeamSize", beamSize);
-      mainShader.uniformUInt("CurrFrameIndex", i);
       glMemoryBarrier(barriers);
       glDispatchCompute((currWidth - 1) / workgroupWidth + 1, (currHeight - 1) / workgroupHeight + 1, 1);
+      mainShader.uniformUInt("PrevBeamIndex", i);
       mainShader.uniformUInt("PrevBeamSize", beamSize);
-      mainShader.uniformUInt("PrevFrameIndex", i);
     }
+    mainShader.uniformUInt("CurrBeamIndex", beamLevels);
+    mainShader.uniformUInt("CurrBeamSize", 1);
+    glMemoryBarrier(barriers);
+    glDispatchCompute((frameWidth - 1) / workgroupWidth + 1, (frameHeight - 1) / workgroupHeight + 1, 1);
 
     gl.setDrawArea(0, 0, window.width(), window.height());
     gl.clear();
 
     // Present to screen.
     basicShader.use();
-    basicShader.uniformSampler("Texture2D", frameTextureIndices.back());
+    basicShader.uniformSampler("Texture2D", frameTextureIndex);
     basicShader.uniformBool("Texture2DEnabled", true);
     basicShader.uniformBool("ColorEnabled", false);
     basicShader.uniformBool("GammaConversion", true);

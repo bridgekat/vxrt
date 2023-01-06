@@ -115,14 +115,14 @@ public:
     mVAO(std::exchange(r.mVAO, OpenGL::null)),
     mVBO(std::exchange(r.mVBO, OpenGL::null)) {}
 
-  VertexBuffer& operator=(VertexBuffer&& r) noexcept {
+  VertexBuffer& operator=(VertexBuffer&& r) {
     swap(*this, r);
     return *this;
   }
 
   ~VertexBuffer();
 
-  friend void swap(VertexBuffer& l, VertexBuffer& r) noexcept {
+  friend void swap(VertexBuffer& l, VertexBuffer& r) {
     using std::swap;
     swap(l.mLayout, r.mLayout);
     swap(l.mNumVertices, r.mNumVertices);

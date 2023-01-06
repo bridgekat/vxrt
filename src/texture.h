@@ -13,14 +13,14 @@ public:
   Texture();
   Texture(size_t size, OpenGL::InternalFormat internalFormat): Texture() { reallocate(size, internalFormat); }
   Texture(Bitmap const& image, size_t levels = static_cast<size_t>(-1));
-  Texture(Texture&& r) noexcept: mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
-  Texture& operator=(Texture&& r) noexcept {
+  Texture(Texture&& r): mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
+  Texture& operator=(Texture&& r) {
     swap(*this, r);
     return *this;
   }
   ~Texture();
 
-  friend void swap(Texture& l, Texture& r) noexcept {
+  friend void swap(Texture& l, Texture& r) {
     using std::swap;
     swap(l.mHandle, r.mHandle);
   }

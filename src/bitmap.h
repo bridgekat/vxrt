@@ -29,27 +29,39 @@ public:
 class Bitmap {
 public:
   Bitmap(size_t width, size_t height, size_t bytesPerPixel):
-    mWidth(width), mHeight(height), mBytesPerPixel(bytesPerPixel), mPitch(align(width * bytesPerPixel)),
+    mWidth(width),
+    mHeight(height),
+    mBytesPerPixel(bytesPerPixel),
+    mPitch(align(width * bytesPerPixel)),
     mData(new uint8_t[mHeight * mPitch]) {
     std::fill(mData.get(), mData.get() + mHeight * mPitch, 0);
   }
+
   Bitmap(std::string const& filename);
 
   // See: https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
-  Bitmap(Bitmap&& r) noexcept:
-    mWidth(r.mWidth), mHeight(r.mHeight), mBytesPerPixel(r.mBytesPerPixel), mPitch(r.mPitch),
+  Bitmap(Bitmap&& r):
+    mWidth(r.mWidth),
+    mHeight(r.mHeight),
+    mBytesPerPixel(r.mBytesPerPixel),
+    mPitch(r.mPitch),
     mData(std::move(r.mData)) {}
+
   Bitmap(Bitmap const& r):
-    mWidth(r.mWidth), mHeight(r.mHeight), mBytesPerPixel(r.mBytesPerPixel), mPitch(r.mPitch),
+    mWidth(r.mWidth),
+    mHeight(r.mHeight),
+    mBytesPerPixel(r.mBytesPerPixel),
+    mPitch(r.mPitch),
     mData(new uint8_t[mHeight * mPitch]) {
     std::copy(r.mData.get(), r.mData.get() + mHeight * mPitch, mData.get());
   }
-  Bitmap& operator=(Bitmap r) noexcept {
+
+  Bitmap& operator=(Bitmap r) {
     swap(*this, r);
     return *this;
   }
 
-  friend void swap(Bitmap& l, Bitmap& r) noexcept {
+  friend void swap(Bitmap& l, Bitmap& r) {
     using std::swap;
     swap(l.mWidth, r.mWidth);
     swap(l.mHeight, r.mHeight);

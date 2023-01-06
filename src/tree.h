@@ -14,10 +14,12 @@ public:
     uint32_t data: 30;
   };
 
-  Tree(int size, int height): mSize(size), mHeight(height), mHeightMap(new int[size * size]) {}
-  ~Tree() { delete[] mHeightMap; }
+  Tree(size_t size, size_t height):
+    mSize(size),
+    mHeight(height),
+    mHeightMap(size * size) {}
 
-  int size() { return mSize; }
+  size_t size() { return mSize; }
   void generate();
   size_t uploadSize() { return (mNodes.size() + 1) * sizeof(uint32_t); };
   void upload(ShaderStorage& ssbo);
@@ -27,12 +29,11 @@ public:
 
 private:
   std::vector<Node> mNodes;
-  int mSize, mHeight;
-  long long mBlocksGenerated;
-  int* mHeightMap;
+  size_t mSize, mHeight, mBlocksGenerated;
+  std::vector<int64_t> mHeightMap;
 
-  void generateNode(size_t ind, int x0, int y0, int z0, int size);
-  int dfs(size_t ind, size_t& count, size_t& redundant);
+  void generateNode(size_t ind, size_t x0, size_t y0, size_t z0, size_t size);
+  int32_t dfs(size_t ind, size_t& count, size_t& redundant);
   bool gcdfs(Node const& node, Node& other, Tree& res);
 };
 

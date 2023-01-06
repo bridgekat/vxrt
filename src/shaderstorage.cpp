@@ -19,11 +19,11 @@ ShaderStorage::ShaderStorage(size_t size, bool persistent) {
   }
 }
 
-ShaderStorage::~ShaderStorage() {
+ShaderStorage::~ShaderStorage() noexcept {
   if (mHandle != OpenGL::null) glDeleteBuffers(1, &mHandle);
 }
 
-void ShaderStorage::reallocate(size_t size) noexcept {
+void ShaderStorage::reallocate(size_t size) {
   // Persistent buffers are immutable, so we must check.
   assert(!persistent());
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, mHandle);
@@ -31,7 +31,7 @@ void ShaderStorage::reallocate(size_t size) noexcept {
   mSize = size;
 }
 
-void ShaderStorage::upload(size_t offset, size_t size, void const* data) noexcept {
+void ShaderStorage::upload(size_t offset, size_t size, void const* data) {
   assert(offset + size <= mSize);
   if (persistent()) {
     std::copy(
@@ -45,7 +45,7 @@ void ShaderStorage::upload(size_t offset, size_t size, void const* data) noexcep
   }
 }
 
-void ShaderStorage::download(size_t offset, size_t size, void* data) const noexcept {
+void ShaderStorage::download(size_t offset, size_t size, void* data) const {
   assert(offset + size <= mSize);
   if (persistent()) {
     std::copy(
@@ -59,13 +59,13 @@ void ShaderStorage::download(size_t offset, size_t size, void* data) const noexc
   }
 }
 
-void ShaderStorage::flush(size_t offset, size_t size) noexcept {
+void ShaderStorage::flush(size_t offset, size_t size) {
   assert(persistent());
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, mHandle);
   glFlushMappedBufferRange(GL_SHADER_STORAGE_BUFFER, offset, size);
 }
 
-void ShaderStorage::wait() noexcept {
+void ShaderStorage::wait() {
   glMemoryBarrier(GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
   auto sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT, std::numeric_limits<GLuint64>::max());

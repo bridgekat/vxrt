@@ -30,7 +30,9 @@ Window::Window(
   bool forceMinimumVersion,
   bool debugContext
 ):
-  mTitle(title), mWidth(width), mHeight(height) {
+  mTitle(title),
+  mWidth(width),
+  mHeight(height) {
   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER);
 
   Log::info("Creating SDL window with OpenGL core context...");
@@ -41,7 +43,7 @@ Window::Window(
   if (multisample > 1) {
     Log::info("- with multisampling buffers");
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, multisample);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, static_cast<int>(multisample));
   }
   if (forceMinimumVersion) {
     Log::info("- with minimum required GL version (4.3)");
@@ -57,8 +59,8 @@ Window::Window(
     mTitle.c_str(),
     SDL_WINDOWPOS_UNDEFINED,
     SDL_WINDOWPOS_UNDEFINED,
-    mWidth,
-    mHeight,
+    static_cast<int>(mWidth),
+    static_cast<int>(mHeight),
     SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
   );
   if (!mWindow) {
@@ -122,8 +124,8 @@ void Window::pollEvents() {
         switch (e.window.event) {
           case SDL_WINDOWEVENT_RESIZED:
           case SDL_WINDOWEVENT_SIZE_CHANGED:
-            mWidth = e.window.data1;
-            mHeight = e.window.data2;
+            mWidth = static_cast<size_t>(e.window.data1);
+            mHeight = static_cast<size_t>(e.window.data2);
             break;
         }
         break;

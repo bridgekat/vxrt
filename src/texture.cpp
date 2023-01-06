@@ -53,7 +53,7 @@ Texture::Texture(Bitmap const& image, size_t levels) {
     glTexImage2D(
       GL_TEXTURE_2D,
       static_cast<GLint>(i),
-      internalFormat,
+      static_cast<GLint>(internalFormat),
       static_cast<GLsizei>(curr.width()),
       static_cast<GLsizei>(curr.height()),
       0,
@@ -65,7 +65,7 @@ Texture::Texture(Bitmap const& image, size_t levels) {
   pop(prev);
 }
 
-Texture::~Texture() {
+Texture::~Texture() noexcept {
   if (mHandle != OpenGL::null) glDeleteTextures(1, &mHandle);
 }
 
@@ -79,7 +79,7 @@ void Texture::reallocate(size_t size, OpenGL::InternalFormat internalFormat) {
   glTexImage2D(
     GL_TEXTURE_2D,
     0,
-    internalFormat,
+    static_cast<GLint>(internalFormat),
     static_cast<GLsizei>(size),
     static_cast<GLsizei>(size),
     0,

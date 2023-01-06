@@ -11,8 +11,9 @@
 class FrameBuffer {
 public:
   FrameBuffer(size_t width, size_t height, size_t colorAttachCount, bool depthAttach);
+  ~FrameBuffer() noexcept;
 
-  FrameBuffer(FrameBuffer&& r):
+  FrameBuffer(FrameBuffer&& r) noexcept:
     mWidth(r.mWidth),
     mHeight(r.mHeight),
     mSize(r.mSize),
@@ -21,14 +22,12 @@ public:
     mDepthTexture(std::exchange(r.mDepthTexture, OpenGL::null)),
     mDepthRenderBuffer(std::exchange(r.mDepthRenderBuffer, OpenGL::null)) {}
 
-  FrameBuffer& operator=(FrameBuffer&& r) {
+  FrameBuffer& operator=(FrameBuffer&& r) noexcept {
     swap(*this, r);
     return *this;
   }
 
-  ~FrameBuffer();
-
-  friend void swap(FrameBuffer& l, FrameBuffer& r) {
+  friend void swap(FrameBuffer& l, FrameBuffer& r) noexcept {
     using std::swap;
     swap(l.mWidth, r.mWidth);
     swap(l.mHeight, r.mHeight);

@@ -29,21 +29,33 @@ public:
 class Bitmap {
 public:
   Bitmap(size_t width, size_t height, size_t bytesPerPixel):
-    mWidth(width), mHeight(height), mBytesPerPixel(bytesPerPixel), mPitch(align(width * bytesPerPixel)),
+    mWidth(width),
+    mHeight(height),
+    mBytesPerPixel(bytesPerPixel),
+    mPitch(align(width * bytesPerPixel)),
     mData(new uint8_t[mHeight * mPitch]) {
     std::fill(mData.get(), mData.get() + mHeight * mPitch, 0);
   }
   Bitmap(std::string const& filename);
+  ~Bitmap() noexcept = default;
 
   // See: https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
   Bitmap(Bitmap&& r) noexcept:
-    mWidth(r.mWidth), mHeight(r.mHeight), mBytesPerPixel(r.mBytesPerPixel), mPitch(r.mPitch),
+    mWidth(r.mWidth),
+    mHeight(r.mHeight),
+    mBytesPerPixel(r.mBytesPerPixel),
+    mPitch(r.mPitch),
     mData(std::move(r.mData)) {}
+
   Bitmap(Bitmap const& r):
-    mWidth(r.mWidth), mHeight(r.mHeight), mBytesPerPixel(r.mBytesPerPixel), mPitch(r.mPitch),
+    mWidth(r.mWidth),
+    mHeight(r.mHeight),
+    mBytesPerPixel(r.mBytesPerPixel),
+    mPitch(r.mPitch),
     mData(new uint8_t[mHeight * mPitch]) {
     std::copy(r.mData.get(), r.mData.get() + mHeight * mPitch, mData.get());
   }
+
   Bitmap& operator=(Bitmap r) noexcept {
     swap(*this, r);
     return *this;
@@ -78,7 +90,7 @@ public:
 
   BitmapSlice slice(size_t x, size_t y, size_t w, size_t h, std::vector<size_t> channels) {
     assert(x + w <= mWidth && y + h <= mHeight);
-    for (auto channel: channels) assert(channel < mBytesPerPixel);
+    for ([[maybe_unused]] auto channel: channels) assert(channel < mBytesPerPixel);
     return BitmapSlice{w, h, channels, mBytesPerPixel, mPitch, mData.get() + y * mPitch + x * mBytesPerPixel};
   }
 

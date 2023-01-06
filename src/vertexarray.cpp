@@ -1,12 +1,13 @@
 #include "vertexarray.h"
 
-VertexBuffer::~VertexBuffer() {
+VertexBuffer::~VertexBuffer() noexcept {
   if (mVAO != OpenGL::null) glDeleteVertexArrays(1, &mVAO);
   if (mVBO != OpenGL::null) glDeleteBuffers(1, &mVBO);
 }
 
 VertexBuffer::VertexBuffer(VertexArray const& va, bool willReuse):
-  mLayout(va.layout()), mNumVertices(va.size() / mLayout.total()) {
+  mLayout(va.layout()),
+  mNumVertices(va.size() / mLayout.total()) {
 
   // Create and populate vertex buffers.
   GLenum usage = willReuse ? GL_STATIC_DRAW : GL_STREAM_DRAW;
@@ -44,5 +45,5 @@ VertexBuffer::VertexBuffer(VertexArray const& va, bool willReuse):
 
 void VertexBuffer::draw() const {
   glBindVertexArray(mVAO);
-  glDrawArrays(mLayout.primitive, 0, mNumVertices);
+  glDrawArrays(mLayout.primitive, 0, static_cast<GLsizei>(mNumVertices));
 }

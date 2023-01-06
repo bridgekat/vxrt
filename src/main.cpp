@@ -1,6 +1,9 @@
 #include <array>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <type_traits>
 #include "bitmap.h"
 #include "camera.h"
 #include "config.h"
@@ -21,23 +24,20 @@ struct HitTestOutputData {
   bool onGround;
 };
 
-constexpr auto numFrames = 2_z;
-constexpr auto beamSizes = std::array<size_t, numFrames>{4_z, 1_z};
+static_assert(std::is_standard_layout_v<MainOutputData> && std::is_trivially_copyable_v<MainOutputData>);
+static_assert(std::is_standard_layout_v<HitTestOutputData> && std::is_trivially_copyable_v<HitTestOutputData>);
 
-constexpr auto noiseTextureIndex = 0, maxTextureIndex = 1, minTextureIndex = 2;
-constexpr auto frameTextureIndices = std::array<GLint, numFrames>{3, 4};
-constexpr auto frameImageIndices = std::array<GLint, numFrames>{0, 1};
+constexpr auto beamLevels = 1_z;
+constexpr auto beamSizes = std::array<size_t, beamLevels>{4_z};
+
+constexpr auto frameTextureIndex = 0, noiseTextureIndex = 1, maxTextureIndex = 2, minTextureIndex = 3;
+constexpr auto frameImageIndex = 0;
+constexpr auto beamImageIndices = std::array<GLint, beamLevels>{1};
 constexpr auto treeBufferIndex = 0, mainOutputBufferIndex = 1, hitTestOutputBufferIndex = 2;
 
-auto initTreeBuffer(
-  ShaderProgram const& mainShader,
-  bool dynamicMode,
-  size_t maxNodes,
-  size_t worldSize,
-  size_t maxHeight
-) -> ShaderStorage {
+auto initTreeBuffer(bool dynamicMode, size_t maxNodes, size_t worldSize, size_t maxHeight) -> ShaderStorage {
   if (dynamicMode) {
-    auto initialHeader = uint32_t(1);
+    auto initialHeader = static_cast<uint32_t>(1);
     auto res = ShaderStorage(sizeof(initialHeader) + sizeof(uint32_t) * maxNodes);
     res.upload(0, sizeof(initialHeader), &initialHeader);
     return res;
@@ -61,13 +61,13 @@ auto loadNoiseMipmaps(Bitmap const& image, bool maximal) -> Texture {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(levels));
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 0);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, static_cast<GLint>(levels));
-  for (auto level = 0_z, scale = 1_z; level <= levels; level++, scale *= 2) {
+  for (auto level = 0_z, scale = 1_z; level <= levels; level++, scale *= 2_z) {
     assert(scale <= size);
     auto curr = Bitmap(size / scale, size / scale, image.bytesPerPixel());
     for (auto i = 0_z; i < size / scale; i++)
       for (auto j = 0_z; j < size / scale; j++)
         for (auto k = 0_z; k < image.bytesPerPixel(); k++) {
-          auto sum = maximal ? uint8_t(0) : uint8_t(255);
+          auto sum = uint8_t(maximal ? 0 : 255);
           for (auto i1 = 0_z; i1 < scale; i1++)
             for (auto j1 = 0_z; j1 < scale; j1++) {
               auto const c = image.at(j * scale + j1, i * scale + i1, k);
@@ -93,7 +93,7 @@ auto loadNoiseMipmaps(Bitmap const& image, bool maximal) -> Texture {
 
 auto updateCameraFrame(Window const& window, Camera& camera) -> void {
   MouseState mouse = window.mouseMotion();
-  camera.rotation += Vec3f(-mouse.y * 0.3f, -mouse.x * 0.3f, 0.0f);
+  camera.rotation += Vec3f(-static_cast<float>(mouse.y) * 0.3f, -static_cast<float>(mouse.x) * 0.3f, 0.0f);
 }
 
 auto updateCameraInterval(
@@ -147,7 +147,112 @@ auto fullscreenQuad(float width, float height, float size) -> VertexArray {
     .vertex({1.0f, -1.0f});
 }
 
+auto average(std::vector<double> const& in, size_t size, size_t scale) -> std::vector<double> {
+  assert(in.size() == size * size);
+  auto res = std::vector<double>(size * size / scale / scale);
+  for (auto i = 0_z; i < size; i += scale)
+    for (auto j = 0_z; j < size; j += scale) {
+      double avg = 0.0;
+      for (auto k = 0_z; k < scale; k++)
+        for (auto l = 0_z; l < scale; l++) {
+          auto ik = i + k;
+          auto jl = j + l;
+          ik = (ik >= scale / 2) ? ik - scale / 2 : size + ik - scale / 2;
+          jl = (jl >= scale / 2) ? jl - scale / 2 : size + jl - scale / 2;
+          avg += in[ik * size + jl];
+        }
+      avg /= static_cast<double>(scale * scale);
+      res[(i / scale) * (size / scale) + (j / scale)] = avg;
+    }
+  return res;
+}
+
+auto enlarge(std::vector<double> const& in, size_t size, size_t scale) -> std::vector<double> {
+  assert(in.size() == size * size);
+  auto res = std::vector<double>(size * size * scale * scale);
+  for (auto i = 0_z; i < size * scale; i++)
+    for (auto j = 0_z; j < size * scale; j++) {
+      auto i0 = i / scale, j0 = j / scale;
+      auto i1 = (i0 + 1) % size, j1 = (j0 + 1) % size;
+      auto a00 = in[i0 * size + j0];
+      auto a01 = in[i0 * size + j1];
+      auto a10 = in[i1 * size + j0];
+      auto a11 = in[i1 * size + j1];
+      auto fi = static_cast<double>(i % scale) / static_cast<double>(scale);
+      auto fj = static_cast<double>(j % scale) / static_cast<double>(scale);
+      res[i * (size * scale) + j] = std::lerp(std::lerp(a00, a01, fj), std::lerp(a10, a11, fj), fi);
+    }
+  return res;
+}
+
+auto add(std::vector<double>& a, std::vector<double> const& b, size_t size) -> void {
+  assert(a.size() == size * size);
+  assert(b.size() == size * size);
+  for (auto i = 0_z; i < size; i++)
+    for (auto j = 0_z; j < size; j++) a[i * size + j] += b[i * size + j];
+}
+
+auto subtract(std::vector<double>& a, std::vector<double> const& b, size_t size) -> void {
+  assert(a.size() == size * size);
+  assert(b.size() == size * size);
+  for (auto i = 0_z; i < size; i++)
+    for (auto j = 0_z; j < size; j++) a[i * size + j] -= b[i * size + j];
+}
+
+auto test() -> void {
+  auto bmp = Bitmap("in.bmp");
+  assert(bmp.width() == 1024 && bmp.height() == 1024);
+
+  auto size = bmp.width();
+  auto img = std::vector<double>(size * size);
+
+  for (auto i = 0_z; i < size; i++)
+    for (auto j = 0_z; j < size; j++) img[i * size + j] = bmp.at(j, i, 0) / 255.0;
+
+  constexpr auto levels = 10_z, limit = 6_z;
+  auto arr = std::array<std::vector<double>, levels>();
+
+  for (auto level = 0_z; level < levels; level++) {
+    auto tmp = average(img, size, 1_z << level);
+    auto currSize = size >> level;
+    auto limitSize = 1_z << limit;
+    assert(tmp.size() == currSize * currSize);
+
+    if (currSize > limitSize) {
+      for (auto i = 0_z; i < limitSize; i++)
+        for (auto j = 0_z; j < limitSize; j++) {
+          double avg = 0.0, cnt = 0.0;
+          for (auto k = i; k < currSize; k += limitSize)
+            for (auto l = j; l < currSize; l += limitSize) {
+              avg += tmp[k * currSize + l];
+              cnt++;
+            }
+          avg /= cnt;
+          for (auto k = i; k < currSize; k += limitSize)
+            for (auto l = j; l < currSize; l += limitSize) tmp[k * currSize + l] = avg;
+        }
+    }
+
+    arr[level] = enlarge(tmp, currSize, 1_z << level);
+    subtract(img, arr[level], size);
+  }
+
+  img = std::vector<double>(size * size, 0.0);
+  for (auto level = 0_z; level < levels; level++) add(img, arr[level], size);
+
+  for (auto i = 0_z; i < size; i++)
+    for (auto j = 0_z; j < size; j++) {
+      auto dvalue = img[i * size + j] * 255.0;
+      auto value = static_cast<uint8_t>(std::max(std::min(dvalue, 255.0), 0.0));
+      bmp.at(j, i, 0) = bmp.at(j, i, 1) = bmp.at(j, i, 2) = value;
+    }
+
+  bmp.save("out.bmp");
+}
+
 auto main() -> int {
+  // test();
+  // return 0;
   auto config = Config();
   config.load(configPath() + configFilename());
 
@@ -192,15 +297,15 @@ auto main() -> int {
   // Initialise voxels.
   auto const worldSize = 1_z << worldLevels;
   auto const noiseSize = 1_z << noiseLevels;
-  auto treeBuffer = initTreeBuffer(mainShader, dynamicMode, maxNodes, worldSize, maxHeight);
+  auto treeBuffer = initTreeBuffer(dynamicMode, maxNodes, worldSize, maxHeight);
   treeBuffer.bindAt(treeBufferIndex);
 
   // Initialise noise.
   auto noiseImage = Bitmap(noiseSize, noiseSize, 4);
   for (size_t x = 0; x < noiseSize; x++)
     for (size_t y = 0; y < noiseSize; y++) {
-      noiseImage.at(x, y, 2) = noiseImage.at(x, y, 0) = rand() % 256;
-      noiseImage.at(x, y, 3) = noiseImage.at(x, y, 1) = rand() % 256;
+      noiseImage.at(x, y, 2) = noiseImage.at(x, y, 0) = static_cast<uint8_t>(rand() % 256);
+      noiseImage.at(x, y, 3) = noiseImage.at(x, y, 1) = static_cast<uint8_t>(rand() % 256);
     }
   auto const noiseTexture = Texture(noiseImage, 0);
   noiseTexture.bindAt(noiseTextureIndex);
@@ -231,10 +336,12 @@ auto main() -> int {
 
   // Initialise (empty) frame textures.
   auto frameWidth = 0_z, frameHeight = 0_z, frameSize = 0_z;
-  auto frames = std::array<Texture, numFrames>();
-  for (auto i = 0_z; i < numFrames; i++) {
-    frames[i].bindAt(frameTextureIndices[i]);
-    glBindImageTexture(frameImageIndices[i], frames[i].handle(), 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+  auto frame = Texture();
+  frame.bindAt(frameTextureIndex);
+  glBindImageTexture(frameImageIndex, frame.handle(), 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+  auto beams = std::array<Texture, beamLevels>();
+  for (auto i = 0_z; i < beamLevels; i++) {
+    glBindImageTexture(beamImageIndices[i], beams[i].handle(), 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
   }
   auto quad = VertexBuffer(fullscreenQuad(0.0f, 0.0f, 0.0f), true);
 
@@ -244,9 +351,9 @@ auto main() -> int {
   camera.aspect = 1.0f; // Updated per frame.
   camera.near = 0.1f;
   camera.far = 256.0f;
-  camera.position.x = static_cast<float>(worldSize) * rand() / (RAND_MAX + 1.0f);
+  camera.position.x = static_cast<float>(worldSize) * static_cast<float>(rand()) / (RAND_MAX + 1.0f);
   camera.position.y = static_cast<float>(worldSize) + 2.0f;
-  camera.position.z = static_cast<float>(worldSize) * rand() / (RAND_MAX + 1.0f);
+  camera.position.z = static_cast<float>(worldSize) * static_cast<float>(rand()) / (RAND_MAX + 1.0f);
 
   auto cameraUpdateScheduler = UpdateScheduler(30.0);
   auto cameraVelocity = Vec3f(0);
@@ -260,7 +367,6 @@ auto main() -> int {
 
   auto startTime = UpdateScheduler::timeFromEpoch();
   auto pathTracing = false;
-  auto curr = 0u;
   window.setMouseLocked(true);
 
   // Main loop.
@@ -391,7 +497,7 @@ auto main() -> int {
           auto const boxMin = camera.position - Vec3f(0.3f, 1.5f, 0.3f);
           auto const boxMax = camera.position + Vec3f(0.3f, 0.2f, 0.3f);
           hitTestShader.use();
-          hitTestShader.uniformUInt("MaxLevels", worldLevels);
+          hitTestShader.uniformUInt("MaxLevels", static_cast<GLuint>(worldLevels));
           hitTestShader.uniformVec3("BoxMin", boxMin.x, boxMin.y, boxMin.z);
           hitTestShader.uniformVec3("BoxMax", boxMax.x, boxMax.y, boxMax.z);
           hitTestShader.uniformVec3("Velocity", cameraVelocity.x, cameraVelocity.y, cameraVelocity.z);
@@ -452,8 +558,9 @@ auto main() -> int {
         frameWidth = width;
         frameHeight = height;
         frameSize = 1_z << ceilLog2(std::max(width, height));
-        for (auto i = 0_z; i < numFrames; i++) {
-          frames[i].reallocate(frameSize / beamSizes[i], OpenGL::internalFormat4f);
+        frame.reallocate(frameSize, OpenGL::internalFormat4f);
+        for (auto i = 0_z; i < beamLevels; i++) {
+          beams[i].reallocate(frameSize / beamSizes[i], OpenGL::internalFormat4f);
         }
         quad = VertexBuffer(
           fullscreenQuad(
@@ -472,13 +579,14 @@ auto main() -> int {
 
     // Initialise shaders.
     mainShader.use();
-    mainShader.uniformSamplers("FrameTexture", numFrames, frameTextureIndices.data());
+    mainShader.uniformImage("FrameImage", frameImageIndex);
+    mainShader.uniformImages("BeamImage", beamLevels, beamImageIndices.data());
     mainShader.uniformSampler("NoiseTexture", noiseTextureIndex);
     mainShader.uniformSampler("MaxTexture", maxTextureIndex);
     mainShader.uniformSampler("MinTexture", minTextureIndex);
 
-    mainShader.uniformUInt("FrameWidth", frameWidth);
-    mainShader.uniformUInt("FrameHeight", frameHeight);
+    mainShader.uniformUInt("FrameWidth", static_cast<GLuint>(frameWidth));
+    mainShader.uniformUInt("FrameHeight", static_cast<GLuint>(frameHeight));
     mainShader.uniformBool("PathTracing", pathTracing);
     mainShader.uniformBool("ProfilerOn", window.isKeyPressed(SDL_SCANCODE_M));
 
@@ -493,36 +601,40 @@ auto main() -> int {
     mainShader.uniformFloat("RandomSeed", static_cast<float>(UpdateScheduler::timeFromEpoch() - startTime));
 
     mainShader.uniformBool("DynamicMode", dynamicMode);
-    mainShader.uniformUInt("MaxNodes", maxNodes);
-    mainShader.uniformUInt("MaxLevels", worldLevels);
-    mainShader.uniformUInt("NoiseLevels", noiseLevels);
-    mainShader.uniformUInt("PartialLevels", partialLevels);
+    mainShader.uniformUInt("MaxNodes", static_cast<GLuint>(maxNodes));
+    mainShader.uniformUInt("MaxLevels", static_cast<GLuint>(worldLevels));
+    mainShader.uniformUInt("NoiseLevels", static_cast<GLuint>(noiseLevels));
+    mainShader.uniformUInt("PartialLevels", static_cast<GLuint>(partialLevels));
     mainShader.uniformFloat("LodQuality", lodQuality);
-    mainShader.uniformImages("FrameImage", numFrames, frameImageIndices.data());
 
     // See: https://www.khronos.org/opengl/wiki/Memory_Model#External_visibility
     auto barriers = GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT;
 
     // Render scene, coarse to fine.
-    mainShader.uniformUInt("PrevBeamSize", 1u); // Initialise.
-    for (auto i = 0_z; i < numFrames; i++) {
+    mainShader.uniformUInt("PrevBeamIndex", beamLevels);
+    mainShader.uniformUInt("PrevBeamSize", 1);
+    for (auto i = 0_z; i < beamLevels; i++) {
       auto const beamSize = beamSizes[i];
       auto const currWidth = frameWidth / beamSize + 1;
       auto const currHeight = frameHeight / beamSize + 1;
-      mainShader.uniformUInt("CurrBeamSize", beamSize);
-      mainShader.uniformUInt("CurrFrameIndex", i);
+      mainShader.uniformUInt("CurrBeamIndex", static_cast<GLuint>(i));
+      mainShader.uniformUInt("CurrBeamSize", static_cast<GLuint>(beamSize));
       glMemoryBarrier(barriers);
       glDispatchCompute((currWidth - 1) / workgroupWidth + 1, (currHeight - 1) / workgroupHeight + 1, 1);
-      mainShader.uniformUInt("PrevBeamSize", beamSize);
-      mainShader.uniformUInt("PrevFrameIndex", i);
+      mainShader.uniformUInt("PrevBeamIndex", static_cast<GLuint>(i));
+      mainShader.uniformUInt("PrevBeamSize", static_cast<GLuint>(beamSize));
     }
+    mainShader.uniformUInt("CurrBeamIndex", beamLevels);
+    mainShader.uniformUInt("CurrBeamSize", 1);
+    glMemoryBarrier(barriers);
+    glDispatchCompute((frameWidth - 1) / workgroupWidth + 1, (frameHeight - 1) / workgroupHeight + 1, 1);
 
     gl.setDrawArea(0, 0, window.width(), window.height());
     gl.clear();
 
     // Present to screen.
     basicShader.use();
-    basicShader.uniformSampler("Texture2D", frameTextureIndices.back());
+    basicShader.uniformSampler("Texture2D", frameTextureIndex);
     basicShader.uniformBool("Texture2DEnabled", true);
     basicShader.uniformBool("ColorEnabled", false);
     basicShader.uniformBool("GammaConversion", true);

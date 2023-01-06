@@ -1,15 +1,19 @@
 #include "config.h"
 #include <fstream>
+#include <string_view>
 #include "log.h"
 
 using std::string;
+using std::string_view;
+
+constexpr string_view Whitespace = " \r\n\t\v\f";
 
 string trim(string const& s) {
-  int l = 0, r = int(s.size()) - 1;
-  while (l < int(s.size()) && string(" \r\n\t\v\f").find(s[l]) != string::npos) l++;
-  while (r >= 0 && string(" \r\n\t\v\f").find(s[r]) != string::npos) r--;
-  if (l > r) return "";
-  return s.substr(l, r - l + 1);
+  size_t l = 0, r = s.size();
+  while (l < s.size() && Whitespace.find(s[l]) != string::npos) l++;
+  while (r > 0 && Whitespace.find(s[r - 1]) != string::npos) r--;
+  if (l >= r) return "";
+  return s.substr(l, r - l);
 }
 
 std::pair<string, string> split(string s) {

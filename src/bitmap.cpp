@@ -70,7 +70,7 @@ Bitmap::Bitmap(std::string const& filename) {
   mBytesPerPixel = static_cast<size_t>(bih.biBitCount) / 8;
   mPitch = align(mWidth * mBytesPerPixel);
   mData.reset(new uint8_t[mHeight * mPitch]);
-  ifs.read(reinterpret_cast<char*>(mData.get()), mHeight * mPitch);
+  ifs.read(reinterpret_cast<char*>(mData.get()), static_cast<std::streamsize>(mHeight * mPitch));
 }
 
 void Bitmap::save(std::string const& filename) const {
@@ -83,7 +83,7 @@ void Bitmap::save(std::string const& filename) const {
   std::ofstream ofs(filename, std::ios::out | std::ios::binary);
   ofs.write(reinterpret_cast<char*>(&bfh), sizeof(BitmapFileHeader));
   ofs.write(reinterpret_cast<char*>(&bih), sizeof(BitmapInfoHeader));
-  ofs.write(reinterpret_cast<char*>(mData.get()), mHeight * mPitch);
+  ofs.write(reinterpret_cast<char*>(mData.get()), static_cast<std::streamsize>(mHeight * mPitch));
 }
 
 void Bitmap::verticalFlip() {

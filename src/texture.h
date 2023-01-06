@@ -11,14 +11,20 @@
 class Texture {
 public:
   Texture();
-  Texture(size_t size, OpenGL::InternalFormat internalFormat): Texture() { reallocate(size, internalFormat); }
   Texture(Bitmap const& image, size_t levels = static_cast<size_t>(-1));
-  Texture(Texture&& r) noexcept: mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
+  Texture(size_t size, OpenGL::InternalFormat internalFormat):
+    Texture() {
+    reallocate(size, internalFormat);
+  }
+  ~Texture() noexcept;
+
+  Texture(Texture&& r) noexcept:
+    mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
+
   Texture& operator=(Texture&& r) noexcept {
     swap(*this, r);
     return *this;
   }
-  ~Texture();
 
   friend void swap(Texture& l, Texture& r) noexcept {
     using std::swap;
@@ -27,13 +33,13 @@ public:
 
   OpenGL::Object handle() const { return mHandle; }
 
-  GLint push() const {
+  OpenGL::Object push() const {
     GLint prev;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
     glBindTexture(GL_TEXTURE_2D, mHandle);
-    return prev;
+    return static_cast<OpenGL::Object>(prev);
   }
-  static void pop(GLint prev) { glBindTexture(GL_TEXTURE_2D, prev); }
+  static void pop(OpenGL::Object prev) { glBindTexture(GL_TEXTURE_2D, prev); }
   static void select(size_t index) { glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + index)); }
 
   void bindAt(size_t index) const {

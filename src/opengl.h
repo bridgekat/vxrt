@@ -60,7 +60,9 @@ public:
   void wait() { glFinish(); }
   Error checkError();
 
-  void setDrawArea(int x, int y, int width, int height) { glViewport(x, y, width, height); }
+  void setDrawArea(size_t x, size_t y, size_t width, size_t height) {
+    glViewport(static_cast<GLint>(x), static_cast<GLint>(y), static_cast<GLsizei>(width), static_cast<GLsizei>(height));
+  }
   void setClearColor(Vec3f const& col, float alpha = 0.0f) { glClearColor(col.x, col.y, col.z, alpha); }
   void setClearDepth(float depth) { glClearDepth(depth); }
   void clear() { glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT); }

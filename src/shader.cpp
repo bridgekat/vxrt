@@ -5,7 +5,8 @@
 #include <vector>
 #include "log.h"
 
-ShaderStage::ShaderStage(OpenGL::ShaderStage stage, std::string const& filename): mStage(stage) {
+ShaderStage::ShaderStage(OpenGL::ShaderStage stage, std::string const& filename):
+  mStage(stage) {
   // Load shader source.
   std::ifstream ifs(filename);
   if (!ifs.is_open()) {
@@ -31,13 +32,13 @@ ShaderStage::ShaderStage(OpenGL::ShaderStage stage, std::string const& filename)
   if (success == GL_FALSE) {
     GLint infoLogLength = 0, charsWritten = 0;
     glGetShaderiv(mHandle, GL_INFO_LOG_LENGTH, &infoLogLength);
-    std::string infoLog(infoLogLength, ' ');
+    std::string infoLog(static_cast<size_t>(infoLogLength), ' ');
     glGetShaderInfoLog(mHandle, infoLogLength, &charsWritten, infoLog.data());
     Log::error("OpenGL shader stage compilation error: " + filename + ":\n" + infoLog);
   }
 }
 
-ShaderStage::~ShaderStage() {
+ShaderStage::~ShaderStage() noexcept {
   if (mHandle != OpenGL::null) glDeleteShader(mHandle);
 }
 
@@ -53,7 +54,7 @@ ShaderProgram::ShaderProgram(std::initializer_list<ShaderStage> stages) {
   if (success == GL_FALSE) {
     GLint infoLogLength = 0, charsWritten = 0;
     glGetProgramiv(mHandle, GL_INFO_LOG_LENGTH, &infoLogLength);
-    std::string infoLog(infoLogLength, ' ');
+    std::string infoLog(static_cast<size_t>(infoLogLength), ' ');
     glGetProgramInfoLog(mHandle, infoLogLength, &charsWritten, infoLog.data());
     Log::error("OpenGL shader program linking error:\n" + infoLog);
   }
@@ -63,11 +64,11 @@ ShaderProgram::ShaderProgram(std::initializer_list<ShaderStage> stages) {
   for (auto const& stage: stages) glDetachShader(mHandle, stage.handle());
 }
 
-ShaderProgram::~ShaderProgram() {
+ShaderProgram::~ShaderProgram() noexcept {
   if (mHandle != OpenGL::null) glDeleteProgram(mHandle);
 }
 
-OpenGL::UniformLocation ShaderProgram::uniformLocation(std::string const& name) const noexcept {
+OpenGL::UniformLocation ShaderProgram::uniformLocation(std::string const& name) const {
   auto loc = glGetUniformLocation(mHandle, name.c_str());
   if (loc == -1) Log::verbose("Specifying unused uniform variable: " + name);
   return loc;

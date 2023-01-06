@@ -49,7 +49,10 @@ static_assert(std::assignable_from<VertexLayout&, VertexLayout&>);
 // (simulates the old-style `glBegin`.)
 class VertexArray {
 public:
-  explicit VertexArray(VertexLayout const& layout): mLayout(layout) { mAttributes.resize(mLayout.total()); }
+  explicit VertexArray(VertexLayout const& layout):
+    mLayout(layout) {
+    mAttributes.resize(mLayout.total());
+  }
 
   VertexLayout const& layout() const { return mLayout; }
   size_t size() const { return mData.size(); }
@@ -108,8 +111,9 @@ static_assert(std::assignable_from<VertexArray&, VertexArray&>);
 class VertexBuffer {
 public:
   explicit VertexBuffer(VertexArray const& va, bool willReuse = false);
+  ~VertexBuffer() noexcept;
 
-  VertexBuffer(VertexBuffer&& r):
+  VertexBuffer(VertexBuffer&& r) noexcept:
     mLayout(r.mLayout),
     mNumVertices(r.mNumVertices),
     mVAO(std::exchange(r.mVAO, OpenGL::null)),
@@ -119,8 +123,6 @@ public:
     swap(*this, r);
     return *this;
   }
-
-  ~VertexBuffer();
 
   friend void swap(VertexBuffer& l, VertexBuffer& r) noexcept {
     using std::swap;

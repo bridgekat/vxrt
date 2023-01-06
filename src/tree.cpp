@@ -2,13 +2,19 @@
 #include <cassert>
 #include <sstream>
 #include <vector>
+#include "bitmap.h"
+#include "common.h"
 #include "log.h"
 #include "worldgen.h"
 
 void Tree::generate() {
   Log::info("Generating terrain height...");
-  for (int x = 0; x < mSize; x++)
-    for (int z = 0; z < mSize; z++) { mHeightMap[x * mSize + z] = WorldGen::getHeight(x, z) + 64; }
+  for (auto x = 0_z; x < mSize; x++) {
+    for (auto z = 0_z; z < mSize; z++) {
+      auto dx = static_cast<double>(x), dz = static_cast<double>(z);
+      mHeightMap[x * mSize + z] = WorldGen::getHeight(dx, dz) + 64;
+    }
+  }
   Log::info("Generating tree...");
   mNodes.resize(1);
   mBlocksGenerated = 0;
@@ -19,7 +25,7 @@ void Tree::upload(ShaderStorage& ssbo) {
   Log::info("Uploading tree data...");
 
   assert(ssbo.size() >= uploadSize());
-  uint32_t nodeCount = mNodes.size();
+  uint32_t nodeCount = static_cast<uint32_t>(mNodes.size());
   ssbo.upload(0, sizeof(uint32_t), &nodeCount);
   ssbo.upload(sizeof(uint32_t), mNodes.size() * sizeof(uint32_t), mNodes.data());
 
@@ -39,14 +45,14 @@ void Tree::download(ShaderStorage& ssbo) {
   Log::info(ss.str());
 }
 
-int Tree::dfs(size_t ind, size_t& count, size_t& redundant) {
+int32_t Tree::dfs(size_t ind, size_t& count, size_t& redundant) {
   count++;
   if (!mNodes[ind].generated) return -1;
   if (mNodes[ind].leaf) return mNodes[ind].data;
   bool re = true;
   int c0 = 0;
   for (size_t i = 0; i < 8; i++) {
-    int curr = dfs(mNodes[ind].data + i, count, redundant);
+    auto curr = dfs(mNodes[ind].data + i, count, redundant);
     if (i == 0) c0 = curr;
     if (curr < 0 || curr != c0) re = false;
   }
@@ -76,7 +82,7 @@ bool Tree::gcdfs(Node const& node, Node& other, Tree& res) {
   if (!node.generated) return false;
   if (node.leaf) return true;
   // Allocate children for `other`.
-  other.data = res.mNodes.size();
+  other.data = static_cast<uint32_t>(res.mNodes.size());
   res.mNodes.resize(other.data + 8);
   // Mid: `node` and `other` are intermediate.
   bool mergeable = true;
@@ -102,18 +108,24 @@ void Tree::gc(Tree& res) {
   // res.check();
 }
 
-void Tree::generateNode(size_t ind, int x0, int y0, int z0, int size) {
+void Tree::generateNode(size_t ind, size_t x0, size_t y0, size_t z0, size_t size) {
   assert(size >= 1 && ind < mNodes.size());
+  assert(0 <= x0 && x0 < mSize);
+  assert(0 <= y0 && y0 < mSize);
+  assert(0 <= z0 && z0 < mSize);
   mNodes[ind].generated = true;
   if (size == 1) {
     // Generate single block
-    double density = WorldGen::getDensity(x0, y0, z0);
-    mNodes[ind].data = WorldGen::getBlock(x0, y0, z0, mHeightMap[x0 * mSize + z0], density);
+    // auto dx0 = static_cast<double>(x0), dy0 = static_cast<double>(y0), dz0 = static_cast<double>(z0);
+    // auto sx0 = static_cast<int64_t>(x0), sy0 = static_cast<int64_t>(y0), sz0 = static_cast<int64_t>(z0);
+    // double density = WorldGen::getDensity(dx0, dy0, dz0);
+    // mNodes[ind].data = WorldGen::getBlock(sx0, sy0, sz0, mHeightMap[x0 * mSize + z0], density) ? 1 : 0;
+    mNodes[ind].data = static_cast<int64_t>(y0) < mHeightMap[x0 * mSize + z0] ? 1 : 0;
     mNodes[ind].leaf = true;
     // Count
     mBlocksGenerated++;
     if (mBlocksGenerated % 10000000 == 0) {
-      int percent = mBlocksGenerated * 100 / ((long long) mSize * mSize * mHeight);
+      size_t percent = mBlocksGenerated * 100 / (mSize * mSize * mHeight);
       std::stringstream ss;
       ss << mBlocksGenerated << " (" << percent << "%) blocks generated, ";
       ss << mNodes.size() << " nodes used.";
@@ -126,10 +138,12 @@ void Tree::generateNode(size_t ind, int x0, int y0, int z0, int size) {
     mNodes[ind].leaf = true;
     return;
   }
+  auto cptr = mNodes.size();
+  auto half = size / 2;
+  assert(cptr < (1u << 30));
+  mNodes[ind].data = static_cast<uint32_t>(cptr);
   mNodes[ind].leaf = false;
-  int cptr = mNodes[ind].data = mNodes.size();
-  int half = size / 2;
-  mNodes.resize(mNodes.size() + 8);
+  mNodes.resize(cptr + 8);
   generateNode(cptr + 0, x0, y0, z0, half);
   generateNode(cptr + 1, x0 + half, y0, z0, half);
   generateNode(cptr + 2, x0, y0 + half, z0, half);
@@ -140,7 +154,7 @@ void Tree::generateNode(size_t ind, int x0, int y0, int z0, int size) {
   generateNode(cptr + 7, x0 + half, y0 + half, z0 + half, half);
   if (mNodes.size() == cptr + 8) {
     bool f = true;
-    for (int i = cptr + 0; i < cptr + 8; i++) {
+    for (auto i = cptr + 0; i < cptr + 8; i++) {
       assert(mNodes[i].leaf);
       if (mNodes[i].data != mNodes[cptr].data) {
         f = false;

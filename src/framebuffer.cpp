@@ -4,7 +4,9 @@
 #include "log.h"
 
 FrameBuffer::FrameBuffer(size_t width, size_t height, size_t colorAttachCount, bool depthAttach):
-  mWidth(width), mHeight(height), mSize(1u << ceilLog2(std::max(width, height))) {
+  mWidth(width),
+  mHeight(height),
+  mSize(1u << ceilLog2(std::max(width, height))) {
 
   // Create framebuffer object.
   glGenFramebuffers(1, &mHandle);
@@ -20,25 +22,50 @@ FrameBuffer::FrameBuffer(size_t width, size_t height, size_t colorAttachCount, b
     // See: https://www.khronos.org/opengl/wiki/Sampler_(GLSL)#Shadow_samplers
     // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
     // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, mSize, mSize, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+    glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      GL_DEPTH_COMPONENT24,
+      static_cast<GLsizei>(mSize),
+      static_cast<GLsizei>(mSize),
+      0,
+      GL_DEPTH_COMPONENT,
+      GL_UNSIGNED_INT,
+      nullptr
+    );
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, mDepthTexture, 0);
   } else {
     // Create depth renderbuffer and attach.
     mDepthRenderBuffer = 0;
     glGenRenderbuffers(1, &mDepthRenderBuffer);
     glBindRenderbuffer(GL_RENDERBUFFER, mDepthRenderBuffer);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, mSize, mSize);
+    glRenderbufferStorage(
+      GL_RENDERBUFFER,
+      GL_DEPTH_COMPONENT24,
+      static_cast<GLsizei>(mSize),
+      static_cast<GLsizei>(mSize)
+    );
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, mDepthRenderBuffer);
   }
 
   // Create color textures and attach.
   mColorTextures.resize(colorAttachCount);
-  glGenTextures(colorAttachCount, mColorTextures.data());
-  for (size_t i = 0; i < colorAttachCount; i++) {
+  glGenTextures(static_cast<GLsizei>(mColorTextures.size()), mColorTextures.data());
+  for (size_t i = 0; i < mColorTextures.size(); i++) {
     glBindTexture(GL_TEXTURE_2D, mColorTextures[i]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, mSize, mSize, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      GL_RGBA32F,
+      static_cast<GLsizei>(mSize),
+      static_cast<GLsizei>(mSize),
+      0,
+      GL_RGB,
+      GL_UNSIGNED_BYTE,
+      nullptr
+    );
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, mColorTextures[i], 0);
   }
 
@@ -51,9 +78,9 @@ FrameBuffer::FrameBuffer(size_t width, size_t height, size_t colorAttachCount, b
   glBindFramebuffer(GL_FRAMEBUFFER, OpenGL::null);
 }
 
-FrameBuffer::~FrameBuffer() {
+FrameBuffer::~FrameBuffer() noexcept {
   if (mHandle != OpenGL::null) glDeleteFramebuffers(1, &mHandle);
-  if (!mColorTextures.empty()) glDeleteTextures(mColorTextures.size(), mColorTextures.data());
+  if (!mColorTextures.empty()) glDeleteTextures(static_cast<GLsizei>(mColorTextures.size()), mColorTextures.data());
   if (mDepthTexture != OpenGL::null) glDeleteTextures(1, &mDepthTexture);
   if (mDepthRenderBuffer != OpenGL::null) glDeleteRenderbuffers(1, &mDepthRenderBuffer);
 }

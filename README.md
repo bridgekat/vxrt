@@ -3,6 +3,13 @@
 A (slow) voxel ray-casting / path-tracing renderer based on sparse voxel octrees!  
 Licensed under WTFPLv2.  
 
+```sh
+git submodule update --init --recursive
+cmake -S . -B build
+cmake --build build -j 4
+cd release && ./vxrt
+```
+
 ### Screenshots
 
 ![New Terrain Generator](https://github.com/bridgekat/files/blob/master/vxrt/1920x986-343spp-17.37s.png?raw=true)

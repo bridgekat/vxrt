@@ -1,13 +1,13 @@
 #ifndef OPENGL_H_
 #define OPENGL_H_
 
+#include "common.h"
+#include "vec.h"
+#include <GL/glew.h>
+#include <SDL2/SDL.h>
 #include <concepts>
 #include <cstdint>
 #include <string>
-#include <GL/glew.h>
-#include <SDL2/SDL.h>
-#include "common.h"
-#include "vec.h"
 
 class OpenGL {
 public:
@@ -53,27 +53,34 @@ public:
   static constexpr InternalFormat internalFormat4f = GL_RGBA32F;
 
   OpenGL(SDL_GLContext context);
-  OpenGL(OpenGL&&) = delete;
-  OpenGL& operator=(OpenGL&&) = delete;
+  OpenGL(OpenGL &&) = delete;
+  OpenGL &operator=(OpenGL &&) = delete;
 
   void commit() { glFlush(); }
   void wait() { glFinish(); }
   Error checkError();
 
   void setDrawArea(size_t x, size_t y, size_t width, size_t height) {
-    glViewport(static_cast<GLint>(x), static_cast<GLint>(y), static_cast<GLsizei>(width), static_cast<GLsizei>(height));
+    glViewport(static_cast<GLint>(x), static_cast<GLint>(y),
+               static_cast<GLsizei>(width), static_cast<GLsizei>(height));
   }
-  void setClearColor(Vec3f const& col, float alpha = 0.0f) { glClearColor(col.x, col.y, col.z, alpha); }
+  void setClearColor(Vec3f const &col, float alpha = 0.0f) {
+    glClearColor(col.x, col.y, col.z, alpha);
+  }
   void setClearDepth(float depth) { glClearDepth(depth); }
-  void clear() { glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT); }
+  void clear() {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+  }
 
-  std::string getString(GLenum name) { return reinterpret_cast<char const*>(glGetString(name)); }
+  std::string getString(GLenum name) {
+    return reinterpret_cast<char const *>(glGetString(name));
+  }
 
 private:
   SDL_GLContext mContext;
 };
 
 static_assert(!std::move_constructible<OpenGL>);
-static_assert(!std::assignable_from<OpenGL&, OpenGL&&>);
+static_assert(!std::assignable_from<OpenGL &, OpenGL &&>);
 
 #endif // OPENGL_H_

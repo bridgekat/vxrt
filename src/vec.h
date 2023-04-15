@@ -12,12 +12,24 @@ class Vec3 {
 public:
   T x, y, z;
 
-  Vec3(): x(0), y(0), z(0) {}
-  Vec3(T x, T y, T z): x(x), y(y), z(z) {}
-  Vec3(T value): x(value), y(value), z(value) {}
+  Vec3():
+    x(0),
+    y(0),
+    z(0) {}
+  Vec3(T x, T y, T z):
+    x(x),
+    y(y),
+    z(z) {}
+  Vec3(T value):
+    x(value),
+    y(value),
+    z(value) {}
 
   template <typename U, std::enable_if_t<std::is_convertible<T, U>::value, std::monostate> = std::monostate()>
-  Vec3(Vec3<U> const& r): x(T(r.x)), y(T(r.y)), z(T(r.z)) {}
+  Vec3(Vec3<U> const& r):
+    x(T(r.x)),
+    y(T(r.y)),
+    z(T(r.z)) {}
 
   friend void swap(Vec3& l, Vec3& r) {
     std::swap(l.x, r.x);

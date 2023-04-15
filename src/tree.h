@@ -2,8 +2,10 @@
 #define TREE_H_
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 #include "shaderstorage.h"
+#include "vertexarray.h"
 
 // TODO: arrange
 class Tree {
@@ -20,12 +22,15 @@ public:
     mHeightMap(size * size) {}
 
   size_t size() { return mSize; }
+  uint32_t nodeAt(size_t x, size_t y, size_t z);
   void generate();
   size_t uploadSize() { return (mNodes.size() + 1) * sizeof(uint32_t); };
   void upload(ShaderStorage& ssbo);
   void download(ShaderStorage& ssbo);
   void check();
   void gc(Tree& res);
+  std::pair<OpenGL::Object, size_t> pointMesh();
+  std::pair<OpenGL::Object, size_t> triangleMesh();
 
 private:
   std::vector<Node> mNodes;

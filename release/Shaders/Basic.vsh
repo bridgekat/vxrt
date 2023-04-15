@@ -3,6 +3,9 @@
 // The basic shaders implement a tiny fragment of the fixed-function pipeline.
 // Currently supports simple vertex transformation, textures and colors.
 
+uniform mat4 ProjectionMatrix;
+uniform mat4 ModelViewMatrix;
+
 layout (location = 0)
 in vec4 PositionAttrib;
 
@@ -20,7 +23,7 @@ out vec4 Color;
 out vec3 Normal;
 
 void main() {
-  gl_Position = PositionAttrib;
+  gl_Position = ProjectionMatrix * ModelViewMatrix * PositionAttrib;
   TexCoord = TexCoordAttrib;
   Color = ColorAttrib;
   Normal = NormalAttrib;

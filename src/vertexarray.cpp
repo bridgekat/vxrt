@@ -1,10 +1,5 @@
 #include "vertexarray.h"
 
-VertexBuffer::~VertexBuffer() noexcept {
-  if (mVAO != OpenGL::null) glDeleteVertexArrays(1, &mVAO);
-  if (mVBO != OpenGL::null) glDeleteBuffers(1, &mVBO);
-}
-
 VertexBuffer::VertexBuffer(VertexArray const& va, bool willReuse):
   mLayout(va.layout()),
   mNumVertices(va.size() / mLayout.total()) {
@@ -41,6 +36,11 @@ VertexBuffer::VertexBuffer(VertexArray const& va, bool willReuse):
     glEnableVertexAttribArray(VertexLayout::coordsAttribIndex);
     p += mLayout.numCoords;
   }
+}
+
+VertexBuffer::~VertexBuffer() noexcept {
+  if (mVAO != OpenGL::null) glDeleteVertexArrays(1, &mVAO);
+  if (mVBO != OpenGL::null) glDeleteBuffers(1, &mVBO);
 }
 
 void VertexBuffer::draw() const {

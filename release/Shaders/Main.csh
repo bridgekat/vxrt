@@ -299,7 +299,7 @@ uint getNode(uint ptr, uint level, uvec3 lpos) {
   uint cdata = NodeData[ptr];
   if (DynamicMode) {
     if (cdata == 0u) {
-      cdata = atomicCompSwap(NodeData[ptr], 0u, 1u);
+      cdata = atomicOr(NodeData[ptr], 1u);
       if (cdata == 0u) {
         cdata = generateNode(level, lpos);
         uint tmp = cdata;

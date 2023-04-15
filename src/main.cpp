@@ -14,6 +14,16 @@
 #include "updatescheduler.h"
 #include "vertexarray.h"
 #include "window.h"
+#define RASTER_MODE
+
+// Raster mode colors.
+constexpr float colors[] =
+  {0.7f, 0.7f, 0.7f, 0.7f, 0.7f, 0.7f, 0.5f, 0.5f, 0.5f, 1.0f, 1.0f, 1.0f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f};
+
+// Raster mode vertex offsets.
+constexpr float vertexOffsets[] = {0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1,
+                                   0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1,
+                                   0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1};
 
 struct MainOutputData {
   uint32_t count;
@@ -35,6 +45,8 @@ constexpr auto frameImageIndex = 0;
 constexpr auto beamImageIndices = std::array<GLint, beamLevels>{1};
 constexpr auto treeBufferIndex = 0, mainOutputBufferIndex = 1, hitTestOutputBufferIndex = 2;
 
+auto tree = std::optional<Tree>();
+
 auto initTreeBuffer(bool dynamicMode, size_t maxNodes, size_t worldSize, size_t maxHeight) -> ShaderStorage {
   if (dynamicMode) {
     auto initialHeader = static_cast<uint32_t>(1);
@@ -42,10 +54,10 @@ auto initTreeBuffer(bool dynamicMode, size_t maxNodes, size_t worldSize, size_t 
     res.upload(0, sizeof(initialHeader), &initialHeader);
     return res;
   } else {
-    auto tree = Tree(worldSize, maxHeight);
-    tree.generate();
-    auto res = ShaderStorage(tree.uploadSize());
-    tree.upload(res);
+    tree = Tree(worldSize, maxHeight);
+    tree->generate();
+    auto res = ShaderStorage(tree->uploadSize());
+    tree->upload(res);
     return res;
   }
 }
@@ -207,9 +219,9 @@ auto test() -> void {
   auto img = std::vector<double>(size * size);
 
   for (auto i = 0_z; i < size; i++)
-    for (auto j = 0_z; j < size; j++) img[i * size + j] = bmp.at(j, i, 0) / 255.0;
+    for (auto j = 0_z; j < size; j++) img[i * size + j] = bmp.at(j, i, 0) / 255.0 / 2.0;
 
-  constexpr auto levels = 10_z, limit = 6_z;
+  constexpr auto levels = 10_z, limit = 5_z;
   auto arr = std::array<std::vector<double>, levels>();
 
   for (auto level = 0_z; level < levels; level++) {
@@ -228,6 +240,7 @@ auto test() -> void {
               cnt++;
             }
           avg /= cnt;
+          avg += rand() / (RAND_MAX + 1.0) * limitSize / currSize * 0.3; // Random perturbation.
           for (auto k = i; k < currSize; k += limitSize)
             for (auto l = j; l < currSize; l += limitSize) tmp[k * currSize + l] = avg;
         }
@@ -250,9 +263,25 @@ auto test() -> void {
   bmp.save("out.bmp");
 }
 
+// TEMP CODE
+struct DrawElementsIndirectCommand {
+  uint32_t count;
+  uint32_t instanceCount;
+  uint32_t firstIndex;
+  int32_t baseVertex;
+  uint32_t baseInstance;
+};
+
+// TEMP CODE
+auto cmd = DrawElementsIndirectCommand{
+  .count = 0,
+  .instanceCount = 1, // Instance count (unused, we only have one instance)
+  .firstIndex = 0,    // First index: element index index "offset"
+  .baseVertex = 0,    // Base vertex: element index "offset"
+  .baseInstance = 0,  // Base instance: instanced attribute "offset" (unused, we only have one instance)
+};
+
 auto main() -> int {
-  // test();
-  // return 0;
   auto config = Config();
   config.load(configPath() + configFilename());
 
@@ -285,7 +314,17 @@ auto main() -> int {
     ShaderStage(OpenGL::vertexShader, shaderPath() + "Basic.vsh"),
     ShaderStage(OpenGL::fragmentShader, shaderPath() + "Basic.fsh"),
   });
-
+#ifdef RASTER_MODE
+  auto const rasterShader = ShaderProgram({
+    ShaderStage(OpenGL::vertexShader, shaderPath() + "Raster.vsh"),
+    ShaderStage(OpenGL::fragmentShader, shaderPath() + "Raster.fsh"),
+  });
+  auto const pointsShader = ShaderProgram({
+    ShaderStage(OpenGL::vertexShader, shaderPath() + "Points.vsh"),
+    ShaderStage(OpenGL::geometryShader, shaderPath() + "Points.gsh"),
+    ShaderStage(OpenGL::fragmentShader, shaderPath() + "Points.fsh"),
+  });
+#else
   auto const mainShader = ShaderProgram({ShaderStage(OpenGL::computeShader, shaderPath() + "Main.csh")});
   auto const mainOutput = ShaderStorage(sizeof(MainOutputData));
   mainOutput.bindAt(mainOutputBufferIndex);
@@ -293,6 +332,7 @@ auto main() -> int {
   auto const hitTestShader = ShaderProgram({ShaderStage(OpenGL::computeShader, shaderPath() + "HitTest.csh")});
   auto const hitTestOutput = ShaderStorage(sizeof(HitTestOutputData));
   hitTestOutput.bindAt(hitTestOutputBufferIndex);
+#endif
 
   // Initialise voxels.
   auto const worldSize = 1_z << worldLevels;
@@ -345,12 +385,26 @@ auto main() -> int {
   }
   auto quad = VertexBuffer(fullscreenQuad(0.0f, 0.0f, 0.0f), true);
 
+#ifdef RASTER_MODE
+  auto mesh = tree.value().triangleMesh();
+  // auto mesh = tree.value().pointMesh();
+  Log::info(std::to_string(mesh.second) + " vertices uploaded.");
+  glBindVertexArray(mesh.first);
+
+  // TEMP CODE
+  cmd.count = static_cast<uint32_t>(mesh.second);
+  auto cmdBuffer = OpenGL::Object{};
+  glGenBuffers(1, &cmdBuffer);
+  glBindBuffer(GL_DRAW_INDIRECT_BUFFER, cmdBuffer);
+  glBufferData(GL_DRAW_INDIRECT_BUFFER, 1 * sizeof(DrawElementsIndirectCommand), &cmd, GL_STATIC_DRAW);
+#endif
+
   // Camera parameters.
   auto camera = Camera();
   camera.fov = fov;
   camera.aspect = 1.0f; // Updated per frame.
   camera.near = 0.1f;
-  camera.far = 256.0f;
+  camera.far = 2048.0f;
   camera.position.x = static_cast<float>(worldSize) * static_cast<float>(rand()) / (RAND_MAX + 1.0f);
   camera.position.y = static_cast<float>(worldSize) + 2.0f;
   camera.position.z = static_cast<float>(worldSize) * static_cast<float>(rand()) / (RAND_MAX + 1.0f);
@@ -492,6 +546,7 @@ auto main() -> int {
           cameraOnGround,
           cameraFlying || cameraCrossWall
         );
+#ifndef RASTER_MODE
         if (!cameraCrossWall) {
           // Invoke the hit test program.
           auto const boxMin = camera.position - Vec3f(0.3f, 1.5f, 0.3f);
@@ -509,6 +564,7 @@ auto main() -> int {
           cameraVelocity = Vec3f(data.velocity[0], data.velocity[1], data.velocity[2]);
           cameraOnGround = data.onGround;
         }
+#endif
         cameraUpdateScheduler.increase();
       }
     } else {
@@ -519,17 +575,21 @@ auto main() -> int {
     frameCounter++;
     frameCounterScheduler.refresh();
     while (!frameCounterScheduler.inSync()) {
+      auto count = 0_z;
+#ifndef RASTER_MODE
       // Count nodes.
       glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
       auto data = MainOutputData();
       mainOutput.download(0, sizeof(MainOutputData), &data);
+      count = data.count;
+#endif
       // Update window title.
       std::stringstream ss;
       ss << "Voxel Raycasting Test (";
       if (dynamicMode) {
-        ss << data.count << " (" << static_cast<size_t>(data.count) * 100 / maxNodes << "%) nodes dynamic";
+        ss << count << " (" << count * 100 / maxNodes << "%) nodes dynamic";
       } else {
-        ss << data.count << " nodes static";
+        ss << count << " nodes static";
       }
       if (pathTracing) {
         ss << ", " << frameCounter << " samples per pixel";
@@ -546,6 +606,7 @@ auto main() -> int {
     // Exit program if ESC is pressed.
     if (window.isKeyPressed(SDL_SCANCODE_ESCAPE)) break;
 
+#ifndef RASTER_MODE
     // =============
     // Render frame.
     // =============
@@ -634,12 +695,41 @@ auto main() -> int {
 
     // Present to screen.
     basicShader.use();
+    basicShader.uniformMat4("ProjectionMatrix", Mat4f(1.0f).data());
+    basicShader.uniformMat4("ModelViewMatrix", Mat4f(1.0f).data());
     basicShader.uniformSampler("Texture2D", frameTextureIndex);
     basicShader.uniformBool("Texture2DEnabled", true);
     basicShader.uniformBool("ColorEnabled", false);
     basicShader.uniformBool("GammaConversion", true);
     glMemoryBarrier(barriers);
     quad.draw();
+
+#else // RASTER_MODE
+    camera.aspect = static_cast<float>(window.width()) / static_cast<float>(window.height());
+    auto interp = camera;
+    interp.position += cameraVelocity * static_cast<float>(std::min(cameraUpdateScheduler.delta(), 1.0));
+    auto transform = (interp.projection() * interp.modelView() * Mat4f::translation(-interp.position));
+
+    gl.setDrawArea(0, 0, window.width(), window.height());
+    gl.setClearColor({0.7f, 0.9f, 1.0f});
+    gl.clear();
+
+    rasterShader.use();
+    rasterShader.uniformMat4("Transform", transform.data());
+    rasterShader.uniformVec3s("FaceColors", 6, colors);
+    // glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(mesh.second));
+    // glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.second), GL_UNSIGNED_INT, nullptr);
+    // glDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, nullptr);
+    glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, nullptr, 1, sizeof(DrawElementsIndirectCommand));
+
+    /*
+    pointsShader.use();
+    pointsShader.uniformMat4("Transform", transform.data());
+    pointsShader.uniformVec3s("Offsets", 24, vertexOffsets);
+    pointsShader.uniformVec3s("FaceColors", 6, colors);
+    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(mesh.second));
+    */
+#endif
 
     window.swapBuffers();
     gl.checkError();

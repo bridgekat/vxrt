@@ -1,14 +1,1 @@
-# Ignore files for convenience. Use `git add -f <files>` to force include necessary files.
-
-.cache/
-.vscode/
-
-# CMake
-build/
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-
-# Release directory
-release/
+/target

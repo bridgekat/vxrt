@@ -532,7 +532,9 @@ pub async fn run() {
             | WindowEvent::KeyboardInput {
               input: KeyboardInput { state: ElementState::Pressed, virtual_keycode: Some(VirtualKeyCode::Escape), .. },
               ..
-            } => *control_flow = ControlFlow::Exit,
+            } => {
+              *control_flow = ControlFlow::Exit;
+            }
             WindowEvent::Resized(physical_size) => {
               state.resize(*physical_size);
             }

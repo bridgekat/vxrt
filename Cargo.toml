@@ -18,3 +18,8 @@ serde = { version = "1.0.192", features = ["derive"] }
 tobj = { version = "4.0.0", features = ["async"] }
 wgpu = "0.18.0"
 winit = "0.28.0"
+
+[[bin]]
+name = "vxrt"
+test = false
+bench = false

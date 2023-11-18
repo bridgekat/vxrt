@@ -41,9 +41,15 @@ impl Texture {
   }
 
   #[allow(dead_code)]
-  pub fn from_bytes(device: &wgpu::Device, queue: &wgpu::Queue, bytes: &[u8], label: &str) -> Result<Self> {
+  pub fn from_bytes(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    bytes: &[u8],
+    label: &str,
+    is_normal_map: bool,
+  ) -> Result<Self> {
     let img = image::load_from_memory(bytes)?;
-    Self::from_image(device, queue, &img, Some(label))
+    Self::from_image(device, queue, &img, Some(label), is_normal_map)
   }
 
   pub fn from_image(
@@ -51,12 +57,13 @@ impl Texture {
     queue: &wgpu::Queue,
     img: &image::DynamicImage,
     label: Option<&str>,
+    is_normal_map: bool,
   ) -> Result<Self> {
     let dimensions = img.dimensions();
     let rgba = img.to_rgba8();
 
     let size = wgpu::Extent3d { width: dimensions.0, height: dimensions.1, depth_or_array_layers: 1 };
-    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    let format = if is_normal_map { wgpu::TextureFormat::Rgba8Unorm } else { wgpu::TextureFormat::Rgba8UnormSrgb };
     let texture = device.create_texture(&wgpu::TextureDescriptor {
       label,
       size,

@@ -32,11 +32,11 @@ public:
     size_t numColors = 0,
     size_t numNormals = 0
   ):
-    primitive(primitive),
-    numCoords(numCoords),
-    numTexCoords(numTexCoords),
-    numColors(numColors),
-    numNormals(numNormals) {}
+      primitive(primitive),
+      numCoords(numCoords),
+      numTexCoords(numTexCoords),
+      numColors(numColors),
+      numNormals(numNormals) {}
 
   size_t total() const { return numTexCoords + numColors + numNormals + numCoords; }
 };
@@ -50,7 +50,7 @@ static_assert(std::assignable_from<VertexLayout&, VertexLayout&>);
 class VertexArray {
 public:
   explicit VertexArray(VertexLayout const& layout):
-    mLayout(layout) {
+      mLayout(layout) {
     mAttributes.resize(mLayout.total());
   }
 
@@ -114,10 +114,10 @@ public:
   ~VertexBuffer() noexcept;
 
   VertexBuffer(VertexBuffer&& r) noexcept:
-    mLayout(r.mLayout),
-    mNumVertices(r.mNumVertices),
-    mVAO(std::exchange(r.mVAO, OpenGL::null)),
-    mVBO(std::exchange(r.mVBO, OpenGL::null)) {}
+      mLayout(r.mLayout),
+      mNumVertices(r.mNumVertices),
+      mVAO(std::exchange(r.mVAO, OpenGL::null)),
+      mVBO(std::exchange(r.mVBO, OpenGL::null)) {}
 
   VertexBuffer& operator=(VertexBuffer&& r) noexcept {
     swap(*this, r);

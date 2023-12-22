@@ -13,13 +13,13 @@ public:
   Texture();
   Texture(Bitmap const& image, size_t levels = static_cast<size_t>(-1));
   Texture(size_t size, OpenGL::InternalFormat internalFormat):
-    Texture() {
+      Texture() {
     reallocate(size, internalFormat);
   }
   ~Texture() noexcept;
 
   Texture(Texture&& r) noexcept:
-    mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
+      mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
 
   Texture& operator=(Texture&& r) noexcept {
     swap(*this, r);

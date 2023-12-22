@@ -9,9 +9,9 @@
 
 template <typename T>
 concept StringStreamConvertible = requires (T a, std::stringstream ss) {
-                                    { ss << a };
-                                    { ss >> a };
-                                  };
+  { ss << a };
+  { ss >> a };
+};
 
 class Config {
 public:

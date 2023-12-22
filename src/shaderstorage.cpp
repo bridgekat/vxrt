@@ -20,7 +20,8 @@ ShaderStorage::ShaderStorage(size_t size, bool persistent) {
 }
 
 ShaderStorage::~ShaderStorage() noexcept {
-  if (mHandle != OpenGL::null) glDeleteBuffers(1, &mHandle);
+  if (mHandle != OpenGL::null)
+    glDeleteBuffers(1, &mHandle);
 }
 
 void ShaderStorage::reallocate(size_t size) {

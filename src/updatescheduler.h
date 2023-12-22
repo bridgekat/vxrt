@@ -3,7 +3,8 @@
 
 class UpdateScheduler {
 public:
-  explicit UpdateScheduler(double frequency): mInterval(1.0 / frequency) {
+  explicit UpdateScheduler(double frequency):
+      mInterval(1.0 / frequency) {
     init();
     sync();
   }

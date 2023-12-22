@@ -12,9 +12,9 @@ public:
   ~ShaderStorage() noexcept;
 
   ShaderStorage(ShaderStorage&& r) noexcept:
-    mHandle(std::exchange(r.mHandle, OpenGL::null)),
-    mPtr(std::exchange(r.mPtr, nullptr)),
-    mSize(std::exchange(r.mSize, 0)) {}
+      mHandle(std::exchange(r.mHandle, OpenGL::null)),
+      mPtr(std::exchange(r.mPtr, nullptr)),
+      mSize(std::exchange(r.mSize, 0)) {}
 
   ShaderStorage& operator=(ShaderStorage&& r) noexcept {
     swap(*this, r);

@@ -9,8 +9,8 @@
 
 void Tree::generate() {
   Log::info("Generating terrain height...");
-  for (auto x = 0_z; x < mSize; x++) {
-    for (auto z = 0_z; z < mSize; z++) {
+  for (auto x = 0uz; x < mSize; x++) {
+    for (auto z = 0uz; z < mSize; z++) {
       auto dx = static_cast<double>(x), dz = static_cast<double>(z);
       mHeightMap[x * mSize + z] = WorldGen::getHeight(dx, dz) + 64;
     }
@@ -47,16 +47,21 @@ void Tree::download(ShaderStorage& ssbo) {
 
 int32_t Tree::dfs(size_t ind, size_t& count, size_t& redundant) {
   count++;
-  if (!mNodes[ind].generated) return -1;
-  if (mNodes[ind].leaf) return mNodes[ind].data;
+  if (!mNodes[ind].generated)
+    return -1;
+  if (mNodes[ind].leaf)
+    return mNodes[ind].data;
   bool re = true;
   int c0 = 0;
   for (size_t i = 0; i < 8; i++) {
     auto curr = dfs(mNodes[ind].data + i, count, redundant);
-    if (i == 0) c0 = curr;
-    if (curr < 0 || curr != c0) re = false;
+    if (i == 0)
+      c0 = curr;
+    if (curr < 0 || curr != c0)
+      re = false;
   }
-  if (re) redundant++;
+  if (re)
+    redundant++;
   return re ? c0 : -1;
 }
 
@@ -79,8 +84,10 @@ void Tree::check() {
 // Returns true if node is merged to a single leaf.
 bool Tree::gcdfs(Node const& node, Node& other, Tree& res) {
   other = node;
-  if (!node.generated) return false;
-  if (node.leaf) return true;
+  if (!node.generated)
+    return false;
+  if (node.leaf)
+    return true;
   // Allocate children for `other`.
   other.data = static_cast<uint32_t>(res.mNodes.size());
   res.mNodes.resize(other.data + 8);
@@ -88,7 +95,8 @@ bool Tree::gcdfs(Node const& node, Node& other, Tree& res) {
   bool mergeable = true;
   for (size_t i = 0; i < 8; i++) {
     bool f = gcdfs(mNodes[node.data + i], res.mNodes[other.data + i], res);
-    if (!f || res.mNodes[other.data + i].data != res.mNodes[other.data].data) mergeable = false;
+    if (!f || res.mNodes[other.data + i].data != res.mNodes[other.data].data)
+      mergeable = false;
   }
   if (mergeable) {
     assert(res.mNodes.size() == other.data + 8);

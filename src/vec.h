@@ -12,12 +12,24 @@ class Vec3 {
 public:
   T x, y, z;
 
-  Vec3(): x(0), y(0), z(0) {}
-  Vec3(T x, T y, T z): x(x), y(y), z(z) {}
-  Vec3(T value): x(value), y(value), z(value) {}
+  Vec3():
+      x(0),
+      y(0),
+      z(0) {}
+  Vec3(T x, T y, T z):
+      x(x),
+      y(y),
+      z(z) {}
+  Vec3(T value):
+      x(value),
+      y(value),
+      z(value) {}
 
   template <typename U, std::enable_if_t<std::is_convertible<T, U>::value, std::monostate> = std::monostate()>
-  Vec3(Vec3<U> const& r): x(T(r.x)), y(T(r.y)), z(T(r.z)) {}
+  Vec3(Vec3<U> const& r):
+      x(T(r.x)),
+      y(T(r.y)),
+      z(T(r.z)) {}
 
   friend void swap(Vec3& l, Vec3& r) {
     std::swap(l.x, r.x);
@@ -63,9 +75,12 @@ public:
   }
 
   bool operator<(Vec3 const& r) const {
-    if (x != r.x) return x < r.x;
-    if (y != r.y) return y < r.y;
-    if (z != r.z) return z < r.z;
+    if (x != r.x)
+      return x < r.x;
+    if (y != r.y)
+      return y < r.y;
+    if (z != r.z)
+      return z < r.z;
     return false;
   }
 
@@ -87,7 +102,8 @@ public:
     Vec3 a;
     for (a.x = begin; a.x < end; a.x++)
       for (a.y = begin; a.y < end; a.y++)
-        for (a.z = begin; a.z < end; a.z++) func(a);
+        for (a.z = begin; a.z < end; a.z++)
+          func(a);
   }
 
   // For each component: begin ~ (end - 1)
@@ -96,7 +112,8 @@ public:
     Vec3 a;
     for (a.x = begin.x; a.x < end.x; a.x++)
       for (a.y = begin.y; a.y < end.y; a.y++)
-        for (a.z = begin.z; a.z < end.z; a.z++) func(a);
+        for (a.z = begin.z; a.z < end.z; a.z++)
+          func(a);
   }
 };
 

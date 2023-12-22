@@ -66,7 +66,8 @@ Texture::Texture(Bitmap const& image, size_t levels) {
 }
 
 Texture::~Texture() noexcept {
-  if (mHandle != OpenGL::null) glDeleteTextures(1, &mHandle);
+  if (mHandle != OpenGL::null)
+    glDeleteTextures(1, &mHandle);
 }
 
 void Texture::reallocate(size_t size, OpenGL::InternalFormat internalFormat) {

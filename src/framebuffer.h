@@ -14,13 +14,13 @@ public:
   ~FrameBuffer() noexcept;
 
   FrameBuffer(FrameBuffer&& r) noexcept:
-    mWidth(r.mWidth),
-    mHeight(r.mHeight),
-    mSize(r.mSize),
-    mHandle(std::exchange(r.mHandle, OpenGL::null)),
-    mColorTextures(std::move(r.mColorTextures)),
-    mDepthTexture(std::exchange(r.mDepthTexture, OpenGL::null)),
-    mDepthRenderBuffer(std::exchange(r.mDepthRenderBuffer, OpenGL::null)) {}
+      mWidth(r.mWidth),
+      mHeight(r.mHeight),
+      mSize(r.mSize),
+      mHandle(std::exchange(r.mHandle, OpenGL::null)),
+      mColorTextures(std::move(r.mColorTextures)),
+      mDepthTexture(std::exchange(r.mDepthTexture, OpenGL::null)),
+      mDepthRenderBuffer(std::exchange(r.mDepthRenderBuffer, OpenGL::null)) {}
 
   FrameBuffer& operator=(FrameBuffer&& r) noexcept {
     swap(*this, r);

@@ -52,10 +52,12 @@ int64_t WorldGen::getHeight(double x, double y) {
   auto lower = (static_cast<int64_t>(fractalNoise2D(x / NoiseScaleX + 0.125, y / NoiseScaleZ + 0.125)) >> 3);
   auto base = static_cast<int64_t>(fractalNoise2D(x / NoiseScaleX / 16.0, y / NoiseScaleZ / 16.0)) * 2 - 320;
   if (transition > upper) {
-    if (mountain > upper) return mountain + base;
+    if (mountain > upper)
+      return mountain + base;
     return upper + base;
   }
-  if (transition < lower) return lower + base;
+  if (transition < lower)
+    return lower + base;
   return transition + base;
 }
 

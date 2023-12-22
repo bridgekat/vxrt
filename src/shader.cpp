@@ -6,7 +6,7 @@
 #include "log.h"
 
 ShaderStage::ShaderStage(OpenGL::ShaderStage stage, std::string const& filename):
-  mStage(stage) {
+    mStage(stage) {
   // Load shader source.
   std::ifstream ifs(filename);
   if (!ifs.is_open()) {
@@ -39,13 +39,15 @@ ShaderStage::ShaderStage(OpenGL::ShaderStage stage, std::string const& filename)
 }
 
 ShaderStage::~ShaderStage() noexcept {
-  if (mHandle != OpenGL::null) glDeleteShader(mHandle);
+  if (mHandle != OpenGL::null)
+    glDeleteShader(mHandle);
 }
 
 ShaderProgram::ShaderProgram(std::initializer_list<ShaderStage> stages) {
   // Link shader stages.
   mHandle = glCreateProgram();
-  for (auto const& stage: stages) glAttachShader(mHandle, stage.handle());
+  for (auto const& stage: stages)
+    glAttachShader(mHandle, stage.handle());
   glLinkProgram(mHandle);
 
   // Check if linking is successful.
@@ -61,15 +63,18 @@ ShaderProgram::ShaderProgram(std::initializer_list<ShaderStage> stages) {
 
   // Detach shader stages.
   // See: https://www.khronos.org/opengl/wiki/Shader_Compilation
-  for (auto const& stage: stages) glDetachShader(mHandle, stage.handle());
+  for (auto const& stage: stages)
+    glDetachShader(mHandle, stage.handle());
 }
 
 ShaderProgram::~ShaderProgram() noexcept {
-  if (mHandle != OpenGL::null) glDeleteProgram(mHandle);
+  if (mHandle != OpenGL::null)
+    glDeleteProgram(mHandle);
 }
 
 OpenGL::UniformLocation ShaderProgram::uniformLocation(std::string const& name) const {
   auto loc = glGetUniformLocation(mHandle, name.c_str());
-  if (loc == -1) Log::verbose("Specifying unused uniform variable: " + name);
+  if (loc == -1)
+    Log::verbose("Specifying unused uniform variable: " + name);
   return loc;
 }

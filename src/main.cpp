@@ -2,12 +2,10 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <type_traits>
 #include "bitmap.h"
 #include "camera.h"
 #include "config.h"
-#include "framebuffer.h"
 #include "shaderstorage.h"
 #include "texture.h"
 #include "tree.h"
@@ -20,15 +18,15 @@ struct MainOutputData {
 };
 
 struct HitTestOutputData {
-  float velocity[4];
+  std::array<float, 4> velocity;
   bool onGround;
 };
 
 static_assert(std::is_standard_layout_v<MainOutputData> && std::is_trivially_copyable_v<MainOutputData>);
 static_assert(std::is_standard_layout_v<HitTestOutputData> && std::is_trivially_copyable_v<HitTestOutputData>);
 
-constexpr auto beamLevels = 1_z;
-constexpr auto beamSizes = std::array<size_t, beamLevels>{4_z};
+constexpr auto beamLevels = 1uz;
+constexpr auto beamSizes = std::array<size_t, beamLevels>{4uz};
 
 constexpr auto frameTextureIndex = 0, noiseTextureIndex = 1, maxTextureIndex = 2, minTextureIndex = 3;
 constexpr auto frameImageIndex = 0;
@@ -61,15 +59,15 @@ auto loadNoiseMipmaps(Bitmap const& image, bool maximal) -> Texture {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(levels));
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, 0);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, static_cast<GLint>(levels));
-  for (auto level = 0_z, scale = 1_z; level <= levels; level++, scale *= 2_z) {
+  for (auto level = 0uz, scale = 1uz; level <= levels; level++, scale *= 2uz) {
     assert(scale <= size);
     auto curr = Bitmap(size / scale, size / scale, image.bytesPerPixel());
-    for (auto i = 0_z; i < size / scale; i++)
-      for (auto j = 0_z; j < size / scale; j++)
-        for (auto k = 0_z; k < image.bytesPerPixel(); k++) {
+    for (auto i = 0uz; i < size / scale; i++)
+      for (auto j = 0uz; j < size / scale; j++)
+        for (auto k = 0uz; k < image.bytesPerPixel(); k++) {
           auto sum = uint8_t(maximal ? 0 : 255);
-          for (auto i1 = 0_z; i1 < scale; i1++)
-            for (auto j1 = 0_z; j1 < scale; j1++) {
+          for (auto i1 = 0uz; i1 < scale; i1++)
+            for (auto j1 = 0uz; j1 < scale; j1++) {
               auto const c = image.at(j * scale + j1, i * scale + i1, k);
               sum = maximal ? std::max(sum, c) : std::min(sum, c);
             }
@@ -91,19 +89,19 @@ auto loadNoiseMipmaps(Bitmap const& image, bool maximal) -> Texture {
   return res;
 }
 
-auto updateCameraFrame(Window const& window, Camera& camera) -> void {
+void updateCameraFrame(Window const& window, Camera& camera) {
   MouseState mouse = window.mouseMotion();
   camera.rotation += Vec3f(-static_cast<float>(mouse.y) * 0.3f, -static_cast<float>(mouse.x) * 0.3f, 0.0f);
 }
 
-auto updateCameraInterval(
+void updateCameraInterval(
   Window const& window,
   Camera& camera,
   Vec3f& velocity,
   float& accY,
   bool& onGround,
   bool flying
-) -> void {
+) {
   camera.position += velocity;
 
   if (flying) {
@@ -112,23 +110,33 @@ auto updateCameraInterval(
   } else {
     velocity.x *= 0.4f;
     velocity.z *= 0.4f;
-    if (onGround) accY = 0.0f;
-    else velocity.y += accY;
+    if (onGround)
+      accY = 0.0f;
+    else
+      velocity.y += accY;
     accY -= 0.005f;
   }
 
   auto acc = Vec3f(0);
-  if (window.isKeyPressed(SDL_SCANCODE_W)) acc += Vec3f(0, 0, -1);
-  if (window.isKeyPressed(SDL_SCANCODE_S)) acc += Vec3f(0, 0, 1);
-  if (window.isKeyPressed(SDL_SCANCODE_A)) acc += Vec3f(-1, 0, 0);
-  if (window.isKeyPressed(SDL_SCANCODE_D)) acc += Vec3f(1, 0, 0);
+  if (window.isKeyPressed(SDL_SCANCODE_W))
+    acc += Vec3f(0, 0, -1);
+  if (window.isKeyPressed(SDL_SCANCODE_S))
+    acc += Vec3f(0, 0, 1);
+  if (window.isKeyPressed(SDL_SCANCODE_A))
+    acc += Vec3f(-1, 0, 0);
+  if (window.isKeyPressed(SDL_SCANCODE_D))
+    acc += Vec3f(1, 0, 0);
   if (flying) {
-    if (window.isKeyPressed(SDL_SCANCODE_SPACE)) acc += Vec3f(0, 1, 0);
-    if (window.isKeyPressed(SDL_SCANCODE_LCTRL)) acc += Vec3f(0, -1, 0);
+    if (window.isKeyPressed(SDL_SCANCODE_SPACE))
+      acc += Vec3f(0, 1, 0);
+    if (window.isKeyPressed(SDL_SCANCODE_LCTRL))
+      acc += Vec3f(0, -1, 0);
   } else if (onGround) {
-    if (window.isKeyPressed(SDL_SCANCODE_SPACE)) velocity.y = 0.2f;
+    if (window.isKeyPressed(SDL_SCANCODE_SPACE))
+      velocity.y = 0.2f;
   }
-  if (window.isKeyPressed(SDL_SCANCODE_TAB)) acc *= 256.0f;
+  if (window.isKeyPressed(SDL_SCANCODE_TAB))
+    acc *= 256.0f;
 
   acc *= 0.1f;
   velocity += camera.transformedVelocity(acc, Vec3i(0, 1, 0));
@@ -150,11 +158,11 @@ auto fullscreenQuad(float width, float height, float size) -> VertexArray {
 auto average(std::vector<double> const& in, size_t size, size_t scale) -> std::vector<double> {
   assert(in.size() == size * size);
   auto res = std::vector<double>(size * size / scale / scale);
-  for (auto i = 0_z; i < size; i += scale)
-    for (auto j = 0_z; j < size; j += scale) {
+  for (auto i = 0uz; i < size; i += scale)
+    for (auto j = 0uz; j < size; j += scale) {
       double avg = 0.0;
-      for (auto k = 0_z; k < scale; k++)
-        for (auto l = 0_z; l < scale; l++) {
+      for (auto k = 0uz; k < scale; k++)
+        for (auto l = 0uz; l < scale; l++) {
           auto ik = i + k;
           auto jl = j + l;
           ik = (ik >= scale / 2) ? ik - scale / 2 : size + ik - scale / 2;
@@ -170,8 +178,8 @@ auto average(std::vector<double> const& in, size_t size, size_t scale) -> std::v
 auto enlarge(std::vector<double> const& in, size_t size, size_t scale) -> std::vector<double> {
   assert(in.size() == size * size);
   auto res = std::vector<double>(size * size * scale * scale);
-  for (auto i = 0_z; i < size * scale; i++)
-    for (auto j = 0_z; j < size * scale; j++) {
+  for (auto i = 0uz; i < size * scale; i++)
+    for (auto j = 0uz; j < size * scale; j++) {
       auto i0 = i / scale, j0 = j / scale;
       auto i1 = (i0 + 1) % size, j1 = (j0 + 1) % size;
       auto a00 = in[i0 * size + j0];
@@ -185,42 +193,45 @@ auto enlarge(std::vector<double> const& in, size_t size, size_t scale) -> std::v
   return res;
 }
 
-auto add(std::vector<double>& a, std::vector<double> const& b, size_t size) -> void {
+void add(std::vector<double>& a, std::vector<double> const& b, size_t size) {
   assert(a.size() == size * size);
   assert(b.size() == size * size);
-  for (auto i = 0_z; i < size; i++)
-    for (auto j = 0_z; j < size; j++) a[i * size + j] += b[i * size + j];
+  for (auto i = 0uz; i < size; i++)
+    for (auto j = 0uz; j < size; j++)
+      a[i * size + j] += b[i * size + j];
 }
 
-auto subtract(std::vector<double>& a, std::vector<double> const& b, size_t size) -> void {
+void subtract(std::vector<double>& a, std::vector<double> const& b, size_t size) {
   assert(a.size() == size * size);
   assert(b.size() == size * size);
-  for (auto i = 0_z; i < size; i++)
-    for (auto j = 0_z; j < size; j++) a[i * size + j] -= b[i * size + j];
+  for (auto i = 0uz; i < size; i++)
+    for (auto j = 0uz; j < size; j++)
+      a[i * size + j] -= b[i * size + j];
 }
 
-auto test() -> void {
+void test() {
   auto bmp = Bitmap("in.bmp");
   assert(bmp.width() == 1024 && bmp.height() == 1024);
 
   auto size = bmp.width();
   auto img = std::vector<double>(size * size);
 
-  for (auto i = 0_z; i < size; i++)
-    for (auto j = 0_z; j < size; j++) img[i * size + j] = bmp.at(j, i, 0) / 255.0;
+  for (auto i = 0uz; i < size; i++)
+    for (auto j = 0uz; j < size; j++)
+      img[i * size + j] = bmp.at(j, i, 0) / 255.0;
 
-  constexpr auto levels = 10_z, limit = 6_z;
+  constexpr auto levels = 10uz, limit = 6uz;
   auto arr = std::array<std::vector<double>, levels>();
 
-  for (auto level = 0_z; level < levels; level++) {
-    auto tmp = average(img, size, 1_z << level);
+  for (auto level = 0uz; level < levels; level++) {
+    auto tmp = average(img, size, 1uz << level);
     auto currSize = size >> level;
-    auto limitSize = 1_z << limit;
+    auto limitSize = 1uz << limit;
     assert(tmp.size() == currSize * currSize);
 
     if (currSize > limitSize) {
-      for (auto i = 0_z; i < limitSize; i++)
-        for (auto j = 0_z; j < limitSize; j++) {
+      for (auto i = 0uz; i < limitSize; i++)
+        for (auto j = 0uz; j < limitSize; j++) {
           double avg = 0.0, cnt = 0.0;
           for (auto k = i; k < currSize; k += limitSize)
             for (auto l = j; l < currSize; l += limitSize) {
@@ -229,19 +240,21 @@ auto test() -> void {
             }
           avg /= cnt;
           for (auto k = i; k < currSize; k += limitSize)
-            for (auto l = j; l < currSize; l += limitSize) tmp[k * currSize + l] = avg;
+            for (auto l = j; l < currSize; l += limitSize)
+              tmp[k * currSize + l] = avg;
         }
     }
 
-    arr[level] = enlarge(tmp, currSize, 1_z << level);
+    arr[level] = enlarge(tmp, currSize, 1uz << level);
     subtract(img, arr[level], size);
   }
 
   img = std::vector<double>(size * size, 0.0);
-  for (auto level = 0_z; level < levels; level++) add(img, arr[level], size);
+  for (auto level = 0uz; level < levels; level++)
+    add(img, arr[level], size);
 
-  for (auto i = 0_z; i < size; i++)
-    for (auto j = 0_z; j < size; j++) {
+  for (auto i = 0uz; i < size; i++)
+    for (auto j = 0uz; j < size; j++) {
       auto dvalue = img[i * size + j] * 255.0;
       auto value = static_cast<uint8_t>(std::max(std::min(dvalue, 255.0), 0.0));
       bmp.at(j, i, 0) = bmp.at(j, i, 1) = bmp.at(j, i, 2) = value;
@@ -256,22 +269,22 @@ auto main() -> int {
   auto config = Config();
   config.load(configPath() + configFilename());
 
-  auto const multisample = config.getOr("GL.Multisamples", 0_z);
+  auto const multisample = config.getOr("GL.Multisamples", 0uz);
   auto const forceMinimumVersion = config.getOr("GL.ForceMinimumVersion", 0) != 0;
   auto const debugContext = config.getOr("GL.Debugging", 0) != 0;
 
   auto const fov = config.getOr("Render.FieldOfView", 70.0f);
-  auto const workgroupWidth = config.getOr("Render.WorkgroupWidth", 8_z);
-  auto const workgroupHeight = config.getOr("Render.WorkgroupHeight", 8_z);
-  auto const renderWidth = config.getOr("Render.RenderWidth", 0_z);
-  auto const renderHeight = config.getOr("Render.RenderHeight", 0_z);
+  auto const workgroupWidth = config.getOr("Render.WorkgroupWidth", 8uz);
+  auto const workgroupHeight = config.getOr("Render.WorkgroupHeight", 8uz);
+  auto const renderWidth = config.getOr("Render.RenderWidth", 0uz);
+  auto const renderHeight = config.getOr("Render.RenderHeight", 0uz);
 
   auto const dynamicMode = config.getOr("World.Dynamic", 0) != 0;
-  auto const maxNodes = config.getOr("World.Dynamic.MaxNodes", 268435454_z);
-  auto const maxHeight = config.getOr("World.Static.MaxHeight", 256_z);
-  auto const worldLevels = config.getOr("World.MaxLevels", 8_z);
-  auto const noiseLevels = config.getOr("World.Dynamic.NoiseLevels", 8_z);
-  auto const partialLevels = config.getOr("World.Dynamic.PartialLevels", 4_z);
+  auto const maxNodes = config.getOr("World.Dynamic.MaxNodes", 268435454uz);
+  auto const maxHeight = config.getOr("World.Static.MaxHeight", 256uz);
+  auto const worldLevels = config.getOr("World.MaxLevels", 8uz);
+  auto const noiseLevels = config.getOr("World.Dynamic.NoiseLevels", 8uz);
+  auto const partialLevels = config.getOr("World.Dynamic.PartialLevels", 4uz);
   auto const lodQuality = config.getOr("World.Dynamic.LodQuality", 0.5f);
 
   auto& window = Window::singleton("", 852, 480, multisample, forceMinimumVersion, debugContext);
@@ -282,21 +295,21 @@ auto main() -> int {
 
   // Load shaders.
   auto const basicShader = ShaderProgram({
-    ShaderStage(OpenGL::vertexShader, shaderPath() + "Basic.vsh"),
-    ShaderStage(OpenGL::fragmentShader, shaderPath() + "Basic.fsh"),
+    ShaderStage(OpenGL::vertexShader, shaderPath() + "basic.vsh"),
+    ShaderStage(OpenGL::fragmentShader, shaderPath() + "basic.fsh"),
   });
 
-  auto const mainShader = ShaderProgram({ShaderStage(OpenGL::computeShader, shaderPath() + "Main.csh")});
+  auto const mainShader = ShaderProgram({ShaderStage(OpenGL::computeShader, shaderPath() + "main.csh")});
   auto const mainOutput = ShaderStorage(sizeof(MainOutputData));
   mainOutput.bindAt(mainOutputBufferIndex);
 
-  auto const hitTestShader = ShaderProgram({ShaderStage(OpenGL::computeShader, shaderPath() + "HitTest.csh")});
-  auto const hitTestOutput = ShaderStorage(sizeof(HitTestOutputData));
-  hitTestOutput.bindAt(hitTestOutputBufferIndex);
+  // auto const hitTestShader = ShaderProgram({ShaderStage(OpenGL::computeShader, shaderPath() + "hit_test.csh")});
+  // auto const hitTestOutput = ShaderStorage(sizeof(HitTestOutputData));
+  // hitTestOutput.bindAt(hitTestOutputBufferIndex);
 
   // Initialise voxels.
-  auto const worldSize = 1_z << worldLevels;
-  auto const noiseSize = 1_z << noiseLevels;
+  auto const worldSize = 1uz << worldLevels;
+  auto const noiseSize = 1uz << noiseLevels;
   auto treeBuffer = initTreeBuffer(dynamicMode, maxNodes, worldSize, maxHeight);
   treeBuffer.bindAt(treeBufferIndex);
 
@@ -335,12 +348,12 @@ auto main() -> int {
   minTexture.bindAt(minTextureIndex);
 
   // Initialise (empty) frame textures.
-  auto frameWidth = 0_z, frameHeight = 0_z, frameSize = 0_z;
+  auto frameWidth = 0uz, frameHeight = 0uz, frameSize = 0uz;
   auto frame = Texture();
   frame.bindAt(frameTextureIndex);
   glBindImageTexture(frameImageIndex, frame.handle(), 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
   auto beams = std::array<Texture, beamLevels>();
-  for (auto i = 0_z; i < beamLevels; i++) {
+  for (auto i = 0uz; i < beamLevels; i++) {
     glBindImageTexture(beamImageIndices[i], beams[i].handle(), 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
   }
   auto quad = VertexBuffer(fullscreenQuad(0.0f, 0.0f, 0.0f), true);
@@ -359,11 +372,11 @@ auto main() -> int {
   auto cameraVelocity = Vec3f(0);
   auto cameraAccY = 0.0f;
   auto cameraOnGround = false;
-  auto cameraFlying = false;
+  auto cameraFlying = true;
   auto cameraCrossWall = false;
 
   auto frameCounterScheduler = UpdateScheduler(1.0);
-  auto frameCounter = 0_z;
+  auto frameCounter = 0uz;
 
   auto startTime = UpdateScheduler::timeFromEpoch();
   auto pathTracing = false;
@@ -379,7 +392,8 @@ auto main() -> int {
 
     static bool lpressed = false;
     if (window.isKeyPressed(SDL_SCANCODE_L)) {
-      if (!lpressed) window.setMouseLocked(!window.mouseLocked());
+      if (!lpressed)
+        window.setMouseLocked(!window.mouseLocked());
       lpressed = true;
     } else {
       lpressed = false;
@@ -424,7 +438,8 @@ auto main() -> int {
 
     static bool f1pressed = false;
     if (window.isKeyPressed(SDL_SCANCODE_F1)) {
-      if (!f1pressed) cameraFlying = !cameraFlying;
+      if (!f1pressed)
+        cameraFlying = !cameraFlying;
       f1pressed = true;
     } else {
       f1pressed = false;
@@ -432,7 +447,8 @@ auto main() -> int {
 
     static bool f2pressed = false;
     if (window.isKeyPressed(SDL_SCANCODE_F2)) {
-      if (!f2pressed) window.setFullscreen(!window.fullscreen());
+      if (!f2pressed)
+        window.setFullscreen(!window.fullscreen());
       f2pressed = true;
     } else {
       f2pressed = false;
@@ -440,7 +456,8 @@ auto main() -> int {
 
     static bool f4pressed = false;
     if (window.isKeyPressed(SDL_SCANCODE_F4)) {
-      if (!f4pressed) cameraCrossWall = !cameraCrossWall;
+      if (!f4pressed)
+        cameraCrossWall = !cameraCrossWall;
       f4pressed = true;
     } else {
       f4pressed = false;
@@ -458,9 +475,9 @@ auto main() -> int {
           glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, bmp.data());
           // Gamma conversion.
           auto const gamma = 2.2;
-          for (auto i = 0_z; i < bmp.height(); i++)
-            for (auto j = 0_z; j < bmp.width(); j++) {
-              for (auto k = 0_z; k < bmp.bytesPerPixel(); k++) {
+          for (auto i = 0uz; i < bmp.height(); i++)
+            for (auto j = 0uz; j < bmp.width(); j++) {
+              for (auto k = 0uz; k < bmp.bytesPerPixel(); k++) {
                 auto col = bmp.at(j, i, k) / 255.0;
                 col = pow(col, 1.0 / gamma);
                 bmp.at(j, i, k) = static_cast<uint8_t>(col * 255.0);
@@ -492,6 +509,7 @@ auto main() -> int {
           cameraOnGround,
           cameraFlying || cameraCrossWall
         );
+        /*
         if (!cameraCrossWall) {
           // Invoke the hit test program.
           auto const boxMin = camera.position - Vec3f(0.3f, 1.5f, 0.3f);
@@ -509,6 +527,7 @@ auto main() -> int {
           cameraVelocity = Vec3f(data.velocity[0], data.velocity[1], data.velocity[2]);
           cameraOnGround = data.onGround;
         }
+        */
         cameraUpdateScheduler.increase();
       }
     } else {
@@ -544,7 +563,8 @@ auto main() -> int {
     }
 
     // Exit program if ESC is pressed.
-    if (window.isKeyPressed(SDL_SCANCODE_ESCAPE)) break;
+    if (window.isKeyPressed(SDL_SCANCODE_ESCAPE))
+      break;
 
     // =============
     // Render frame.
@@ -557,9 +577,9 @@ auto main() -> int {
       if (frameWidth != width || frameHeight != height) {
         frameWidth = width;
         frameHeight = height;
-        frameSize = 1_z << ceilLog2(std::max(width, height));
+        frameSize = 1uz << ceilLog2(std::max(width, height));
         frame.reallocate(frameSize, OpenGL::internalFormat4f);
-        for (auto i = 0_z; i < beamLevels; i++) {
+        for (auto i = 0uz; i < beamLevels; i++) {
           beams[i].reallocate(frameSize / beamSizes[i], OpenGL::internalFormat4f);
         }
         quad = VertexBuffer(
@@ -613,7 +633,7 @@ auto main() -> int {
     // Render scene, coarse to fine.
     mainShader.uniformUInt("PrevBeamIndex", beamLevels);
     mainShader.uniformUInt("PrevBeamSize", 1);
-    for (auto i = 0_z; i < beamLevels; i++) {
+    for (auto i = 0uz; i < beamLevels; i++) {
       auto const beamSize = beamSizes[i];
       auto const currWidth = frameWidth / beamSize + 1;
       auto const currHeight = frameHeight / beamSize + 1;

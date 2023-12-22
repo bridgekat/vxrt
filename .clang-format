@@ -17,7 +17,7 @@ BreakBeforeBraces: Attach
 # Indentations
 AccessModifierOffset: -2
 IndentAccessModifiers: false
-ConstructorInitializerIndentWidth: 2
+ConstructorInitializerIndentWidth: 4
 ContinuationIndentWidth: 2
 PPIndentWidth: 2
 NamespaceIndentation: All
@@ -28,7 +28,6 @@ IndentGotoLabels: false
 IndentPPDirectives: AfterHash
 IndentWrappedFunctionNames: false
 IndentRequiresClause: false
-RequiresExpressionIndentation: OuterScope
 
 # Line break points
 BreakBeforeBinaryOperators: NonAssignment
@@ -59,13 +58,13 @@ EmptyLineAfterAccessModifier: Leave
 SeparateDefinitionBlocks: Leave
 
 # One-liners
-AllowShortBlocksOnASingleLine: Always
-AllowShortCaseLabelsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
 AllowShortEnumsOnASingleLine: true
-AllowShortFunctionsOnASingleLine: All
-AllowShortIfStatementsOnASingleLine: AllIfsAndElse
-AllowShortLambdasOnASingleLine: All
-AllowShortLoopsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: Inline
+AllowShortLoopsOnASingleLine: false
 
 CompactNamespaces: false
 RemoveBracesLLVM: false

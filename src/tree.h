@@ -15,9 +15,9 @@ public:
   };
 
   Tree(size_t size, size_t height):
-    mSize(size),
-    mHeight(height),
-    mHeightMap(size * size) {}
+      mSize(size),
+      mHeight(height),
+      mHeightMap(size * size) {}
 
   size_t size() { return mSize; }
   void generate();

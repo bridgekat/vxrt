@@ -1,8 +1,8 @@
 #ifndef BITMAP_H_
 #define BITMAP_H_
 
+#include <algorithm>
 #include <cassert>
-#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -29,11 +29,11 @@ public:
 class Bitmap {
 public:
   Bitmap(size_t width, size_t height, size_t bytesPerPixel):
-    mWidth(width),
-    mHeight(height),
-    mBytesPerPixel(bytesPerPixel),
-    mPitch(align(width * bytesPerPixel)),
-    mData(new uint8_t[mHeight * mPitch]) {
+      mWidth(width),
+      mHeight(height),
+      mBytesPerPixel(bytesPerPixel),
+      mPitch(align(width * bytesPerPixel)),
+      mData(new uint8_t[mHeight * mPitch]) {
     std::fill(mData.get(), mData.get() + mHeight * mPitch, 0);
   }
   Bitmap(std::string const& filename);
@@ -41,18 +41,18 @@ public:
 
   // See: https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
   Bitmap(Bitmap&& r) noexcept:
-    mWidth(r.mWidth),
-    mHeight(r.mHeight),
-    mBytesPerPixel(r.mBytesPerPixel),
-    mPitch(r.mPitch),
-    mData(std::move(r.mData)) {}
+      mWidth(r.mWidth),
+      mHeight(r.mHeight),
+      mBytesPerPixel(r.mBytesPerPixel),
+      mPitch(r.mPitch),
+      mData(std::move(r.mData)) {}
 
   Bitmap(Bitmap const& r):
-    mWidth(r.mWidth),
-    mHeight(r.mHeight),
-    mBytesPerPixel(r.mBytesPerPixel),
-    mPitch(r.mPitch),
-    mData(new uint8_t[mHeight * mPitch]) {
+      mWidth(r.mWidth),
+      mHeight(r.mHeight),
+      mBytesPerPixel(r.mBytesPerPixel),
+      mPitch(r.mPitch),
+      mData(new uint8_t[mHeight * mPitch]) {
     std::copy(r.mData.get(), r.mData.get() + mHeight * mPitch, mData.get());
   }
 
@@ -90,13 +90,15 @@ public:
 
   BitmapSlice slice(size_t x, size_t y, size_t w, size_t h, std::vector<size_t> channels) {
     assert(x + w <= mWidth && y + h <= mHeight);
-    for ([[maybe_unused]] auto channel: channels) assert(channel < mBytesPerPixel);
+    for ([[maybe_unused]] auto channel: channels)
+      assert(channel < mBytesPerPixel);
     return BitmapSlice{w, h, channels, mBytesPerPixel, mPitch, mData.get() + y * mPitch + x * mBytesPerPixel};
   }
 
   BitmapSlice all() {
     std::vector<size_t> channels;
-    for (size_t i = 0; i < mBytesPerPixel; i++) channels.push_back(i);
+    for (size_t i = 0; i < mBytesPerPixel; i++)
+      channels.push_back(i);
     return slice(0, 0, mWidth, mHeight, channels);
   }
 

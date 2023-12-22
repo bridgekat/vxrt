@@ -34,12 +34,14 @@ public:
   bool shouldQuit() const { return mShouldQuit; }
 
   MouseState mousePosition() const {
-    if (mMouse.relative) assert(false); // Cursor locked, use mouseMotion() instead!
+    if (mMouse.relative)
+      assert(false); // Cursor locked, use mouseMotion() instead!
     return mMouse;
   }
 
   MouseState mouseMotion() const {
-    if (mMouse.relative) return mMouse;
+    if (mMouse.relative)
+      return mMouse;
     MouseState res = mMouse;
     res.x -= mPrevMouse.x;
     res.y -= mPrevMouse.y;

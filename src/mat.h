@@ -45,7 +45,8 @@ public:
 
   BasicMat& operator+=(BasicMat const& r) {
     for (size_t i = 0; i < M; i++) {
-      for (size_t j = 0; j < N; j++) (*this)[i][i] += r[i][i];
+      for (size_t j = 0; j < N; j++)
+        (*this)[i][i] += r[i][i];
     }
     return *this;
   }
@@ -57,17 +58,20 @@ public:
 
   void swapRows(size_t i, size_t j) {
     assert(i < M && j < M);
-    for (size_t k = 0; k < N; k++) std::swap((*this)[i][k], (*this)[j][k]);
+    for (size_t k = 0; k < N; k++)
+      std::swap((*this)[i][k], (*this)[j][k]);
   }
 
   void mulRow(size_t i, T value) {
     assert(i < M);
-    for (size_t k = 0; k < N; k++) (*this)[i][k] *= value;
+    for (size_t k = 0; k < N; k++)
+      (*this)[i][k] *= value;
   }
 
   void mulAddRow(size_t src, size_t dst, T value) {
     assert(dst < M && src < M);
-    for (size_t k = 0; k < N; k++) (*this)[dst][k] += (*this)[src][k] * value;
+    for (size_t k = 0; k < N; k++)
+      (*this)[dst][k] += (*this)[src][k] * value;
   }
 
 private:
@@ -79,7 +83,8 @@ BasicMat<T, M, N> operator*(BasicMat<T, M, K> const& l, BasicMat<T, K, N> const&
   BasicMat<T, M, N> res;
   for (size_t i = 0; i < M; i++) {
     for (size_t k = 0; k < K; k++) {
-      for (size_t j = 0; j < N; j++) res[i][j] += l[i][k] * r[k][j];
+      for (size_t j = 0; j < N; j++)
+        res[i][j] += l[i][k] * r[k][j];
     }
   }
   return res;
@@ -93,12 +98,14 @@ public:
 
   // Identity matrix constructor.
   SquareMat(T value) {
-    for (size_t i = 0; i < N; i++) (*this)[i][i] = value;
+    for (size_t i = 0; i < N; i++)
+      (*this)[i][i] = value;
   }
 
   SquareMat& transpose() {
     for (size_t i = 0; i < N; i++) {
-      for (size_t j = i + 1; j < N; j++) std::swap((*this)[i][j], (*this)[j][i]);
+      for (size_t j = i + 1; j < N; j++)
+        std::swap((*this)[i][j], (*this)[j][i]);
     }
     return *this;
   }
@@ -120,7 +127,8 @@ public:
     for (size_t i = 0; i < N; i++) {
       size_t p = i;
       for (size_t j = i + 1; j < N; j++) {
-        if (abs(t[j][i]) > abs(t[p][i])) p = j;
+        if (abs(t[j][i]) > abs(t[p][i]))
+          p = j;
       }
       t.swapRows(i, p);
       res.swapRows(i, p);

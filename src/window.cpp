@@ -15,10 +15,18 @@
 void GLCALLBACK glDebugCallback(GLenum, GLenum, GLuint, GLenum severity, GLsizei, GLchar const* msg, void const*) {
   std::string s = "OpenGL debug message: " + std::string(msg);
   switch (severity) {
-    case GL_DEBUG_SEVERITY_HIGH: Log::error(s); break;
-    case GL_DEBUG_SEVERITY_MEDIUM: Log::warning(s); break;
-    case GL_DEBUG_SEVERITY_LOW: Log::info(s); break;
-    case GL_DEBUG_SEVERITY_NOTIFICATION: Log::verbose(s); break;
+    case GL_DEBUG_SEVERITY_HIGH:
+      Log::error(s);
+      break;
+    case GL_DEBUG_SEVERITY_MEDIUM:
+      Log::warning(s);
+      break;
+    case GL_DEBUG_SEVERITY_LOW:
+      Log::info(s);
+      break;
+    case GL_DEBUG_SEVERITY_NOTIFICATION:
+      Log::verbose(s);
+      break;
   }
 }
 
@@ -30,9 +38,9 @@ Window::Window(
   bool forceMinimumVersion,
   bool debugContext
 ):
-  mTitle(title),
-  mWidth(width),
-  mHeight(height) {
+    mTitle(title),
+    mWidth(width),
+    mHeight(height) {
   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER);
 
   Log::info("Creating SDL window with OpenGL core context...");
@@ -112,14 +120,17 @@ void Window::pollEvents() {
     mMouse.left = buttons & SDL_BUTTON_LEFT;
     mMouse.right = buttons & SDL_BUTTON_RIGHT;
     mMouse.mid = buttons & SDL_BUTTON_MIDDLE;
-    if (mMouse.relative) mPrevMouse = mMouse;
+    if (mMouse.relative)
+      mPrevMouse = mMouse;
     mMouse.relative = false;
   }
 
   SDL_Event e;
   while (SDL_PollEvent(&e)) {
     switch (e.type) {
-      case SDL_QUIT: mShouldQuit = true; break;
+      case SDL_QUIT:
+        mShouldQuit = true;
+        break;
       case SDL_WINDOWEVENT:
         switch (e.window.event) {
           case SDL_WINDOWEVENT_RESIZED:

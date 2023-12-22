@@ -13,8 +13,8 @@ public:
   ~ShaderStage() noexcept;
 
   ShaderStage(ShaderStage&& r) noexcept:
-    mStage(r.mStage),
-    mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
+      mStage(r.mStage),
+      mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
 
   ShaderStage& operator=(ShaderStage&& r) noexcept {
     swap(*this, r);
@@ -44,7 +44,7 @@ public:
   ~ShaderProgram() noexcept;
 
   ShaderProgram(ShaderProgram&& r) noexcept:
-    mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
+      mHandle(std::exchange(r.mHandle, OpenGL::null)) {}
 
   ShaderProgram& operator=(ShaderProgram&& r) noexcept {
     swap(*this, r);

@@ -1,12 +1,13 @@
 #include "framebuffer.h"
 #include <algorithm>
 #include <vector>
+#include "common.h"
 #include "log.h"
 
 FrameBuffer::FrameBuffer(size_t width, size_t height, size_t colorAttachCount, bool depthAttach):
-  mWidth(width),
-  mHeight(height),
-  mSize(1u << ceilLog2(std::max(width, height))) {
+    mWidth(width),
+    mHeight(height),
+    mSize(1u << ceilLog2(std::max(width, height))) {
 
   // Create framebuffer object.
   glGenFramebuffers(1, &mHandle);
@@ -79,10 +80,14 @@ FrameBuffer::FrameBuffer(size_t width, size_t height, size_t colorAttachCount, b
 }
 
 FrameBuffer::~FrameBuffer() noexcept {
-  if (mHandle != OpenGL::null) glDeleteFramebuffers(1, &mHandle);
-  if (!mColorTextures.empty()) glDeleteTextures(static_cast<GLsizei>(mColorTextures.size()), mColorTextures.data());
-  if (mDepthTexture != OpenGL::null) glDeleteTextures(1, &mDepthTexture);
-  if (mDepthRenderBuffer != OpenGL::null) glDeleteRenderbuffers(1, &mDepthRenderBuffer);
+  if (mHandle != OpenGL::null)
+    glDeleteFramebuffers(1, &mHandle);
+  if (!mColorTextures.empty())
+    glDeleteTextures(static_cast<GLsizei>(mColorTextures.size()), mColorTextures.data());
+  if (mDepthTexture != OpenGL::null)
+    glDeleteTextures(1, &mDepthTexture);
+  if (mDepthRenderBuffer != OpenGL::null)
+    glDeleteRenderbuffers(1, &mDepthRenderBuffer);
 }
 
 void FrameBuffer::bindBuffers() {
@@ -91,7 +96,8 @@ void FrameBuffer::bindBuffers() {
     return;
   }
   std::vector<GLenum> arr(mColorTextures.size());
-  for (size_t i = 0; i < arr.size(); i++) arr[i] = static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + i);
+  for (size_t i = 0; i < arr.size(); i++)
+    arr[i] = static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + i);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mHandle);
   glDrawBuffers(arr.size(), arr.data());
 }

@@ -21,7 +21,8 @@ double UpdateScheduler::getTime() {
 #else
 #  include <chrono>
 
-void UpdateScheduler::init() {}
+void UpdateScheduler::init() {
+}
 
 double UpdateScheduler::getTime() {
   using namespace std::chrono;

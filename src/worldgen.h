@@ -12,7 +12,9 @@ namespace WorldGen {
   constexpr double NoiseScaleY3D = 100;
   constexpr double NoiseScaleZ3D = 100;
 
-  inline double interpolate(double a, double b, double x) { return a * (1.0 - x) + b * x; }
+  inline double interpolate(double a, double b, double x) {
+    return a * (1.0 - x) + b * x;
+  }
   inline double noise2D(int64_t x, int64_t y) {
     int64_t xx = x * 107 + y * 13258953287;
     xx = xx >> 13 ^ xx;

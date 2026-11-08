@@ -6,10 +6,6 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub world_levels: u32,
     pub max_height: u32,
-    pub dynamic: bool,
-    pub max_nodes: u32,
-    pub noise_levels: u32,
-    pub partial_levels: u32,
     pub lod_quality: f32,
     pub field_of_view: f32,
     pub render_width: u32,
@@ -25,10 +21,6 @@ impl Default for Config {
         Self {
             world_levels: 8,
             max_height: 256,
-            dynamic: false,
-            max_nodes: 16_777_216,
-            noise_levels: 8,
-            partial_levels: 4,
             lod_quality: 0.5,
             field_of_view: 70.0,
             render_width: 0,
@@ -65,25 +57,8 @@ impl Config {
             "sky_intensity and sun_intensity must be finite and nonnegative"
         );
         ensure!(
-            (1..=20).contains(&self.world_levels),
-            "world_levels must be 1..=20 (traversal stack capacity)"
-        );
-        ensure!(
-            (1..=12).contains(&self.noise_levels),
-            "noise_levels must be 1..=12"
-        );
-        ensure!(
-            self.partial_levels <= 8
-                && self.noise_levels <= self.world_levels + self.partial_levels,
-            "invalid noise/partial levels"
-        );
-        ensure!(
-            self.max_nodes >= 9 && self.max_nodes < (1 << 30),
-            "max_nodes must be 9..2^30"
-        );
-        ensure!(
-            self.dynamic || self.world_levels <= 10,
-            "static generation is limited to 10 levels; use dynamic for larger worlds"
+            (1..=10).contains(&self.world_levels),
+            "world_levels must be 1..=10"
         );
         ensure!(
             self.lod_quality.is_finite() && self.lod_quality > 0.0,
@@ -94,66 +69,5 @@ impl Config {
             "field_of_view must be 1..179 degrees"
         );
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn rejects_invalid_shader_parameters() {
-        for config in [
-            Config {
-                march_budget: 0,
-                ..Default::default()
-            },
-            Config {
-                march_budget: 65537,
-                ..Default::default()
-            },
-            Config {
-                sky_intensity: -1.0,
-                ..Default::default()
-            },
-            Config {
-                sun_intensity: f32::NAN,
-                ..Default::default()
-            },
-            Config {
-                world_levels: 21,
-                ..Default::default()
-            },
-            Config {
-                partial_levels: u32::MAX,
-                ..Default::default()
-            },
-            Config {
-                max_nodes: 8,
-                ..Default::default()
-            },
-            Config {
-                lod_quality: f32::NAN,
-                ..Default::default()
-            },
-            Config {
-                field_of_view: 180.0,
-                ..Default::default()
-            },
-        ] {
-            assert!(config.validate().is_err());
-        }
-        Config::default().validate().unwrap();
-        for march_budget in [1, 1024, 65536] {
-            let config: Config = toml::from_str(&format!("march_budget = {march_budget}")).unwrap();
-            assert_eq!(config.march_budget, march_budget);
-            config.validate().unwrap();
-        }
-        Config {
-            sky_intensity: 0.0,
-            sun_intensity: 0.0,
-            ..Default::default()
-        }
-        .validate()
-        .unwrap();
     }
 }

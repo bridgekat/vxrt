@@ -16,7 +16,7 @@ Shaders are embedded in the executable. Configuration and screenshot paths are r
 
 Interactive mode renders a fresh frame every time. Press **P** to freeze the camera and accumulate path-tracing samples in linear light; press P again to return to interactive rendering. Accumulation resets when switching modes, changing the camera or render resolution, or compacting the octree.
 
-Terrain can be precomputed on the CPU or generated dynamically on the GPU. Explore dynamic terrain in interactive mode before pressing P: path tracing freezes the generated tree and treats unresolved regions as coarse opaque cells. Returning to interactive mode resumes generation.
+Terrain is built on the CPU at startup and uploaded as a read-only octree. Geometry uses plain white surfaces without a grid overlay. Interactive rendering uses directional shading; surfaces have constant neutral albedo 0.8, with colored sky and sun illumination in path tracing.
 
 Path tracing uses cosine-weighted Lambertian bounces, sun next-event estimation with multiple importance sampling, and Russian roulette. Bounce samples are spatially shared by default to encourage coherent rays; camera jitter is per-pixel. Set `coherent_sampling = false` to try per-pixel bounce samples and compare the noise/performance tradeoff.
 
@@ -46,36 +46,19 @@ cargo run --locked -- --print-config > config.toml
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `dynamic` | `false` | Generate terrain lazily on the GPU instead of precomputing it on the CPU |
-| `world_levels` | `8` | World side length is `2^world_levels` voxels; maximum 10 for static terrain or 20 for dynamic terrain |
-| `max_height` | `256` | Height cutoff used when constructing static terrain |
-| `max_nodes` | `16777216` | Dynamic node capacity; each node occupies four bytes |
-| `noise_levels` | `8` | Dynamic noise texture side length is `2^noise_levels`; allowed range 1–12 |
-| `partial_levels` | `4` | Dynamic terrain noise offset/detail parameter; allowed range 0–8 |
+| `world_levels` | `8` | World side length is `2^world_levels` voxels; allowed range 1–10 |
+| `max_height` | `256` | Exclusive voxel-height cutoff; voxels at or above it are empty |
 | `lod_quality` | `0.5` | Positive detail-quality factor; larger values retain finer detail |
 | `march_budget` | `256` | Maximum traversal iterations per ray; allowed range 1–65536 |
 | `field_of_view` | `70.0` | Vertical field of view in degrees; at least 1 and less than 179 |
 | `render_width` | `0` | Render width in pixels; zero follows the window |
 | `render_height` | `0` | Render height in pixels; zero follows the window |
-| `seed` | `1` | Seed for path samples and dynamic terrain noise; static terrain geometry uses a fixed height function |
+| `seed` | `1` | Seed for path samples; terrain geometry uses a fixed height function |
 | `coherent_sampling` | `true` | Share bounce samples across pixels; `false` decorrelates them. Camera jitter is always per-pixel |
 | `sky_intensity` | `1.0` | Nonnegative linear multiplier for sky radiance outside the sun disk; zero makes it black |
 | `sun_intensity` | `1.0` | Nonnegative linear multiplier for the sun disk radiance |
 
-`noise_levels` must not exceed `world_levels + partial_levels`. Static generation grows cubically with world size. The default dynamic allocation budget occupies 64 MiB plus a four-byte header. GPU buffer limits also constrain the node budget and render resolution.
-
-For a larger dynamically generated world:
-
-```toml
-dynamic = true
-world_levels = 16
-noise_levels = 8
-partial_levels = 4
-max_nodes = 16777216
-lod_quality = 0.5
-```
-
-When the dynamic node budget is exhausted, unresolved nodes appear as coarse opaque placeholders. Increase `max_nodes` or reduce detail to avoid them. Compute workgroups are fixed at 8×8.
+Terrain generation grows cubically with world size. The GPU tree occupies four bytes per generated node plus a four-byte header. GPU buffer limits constrain terrain size and render resolution. Compute workgroups are fixed at 8×8.
 
 Set `march_budget = 1024` in `config.toml` to allow longer rays before traversal gives up, then restart the application. It applies to interactive, beam, path, and shadow rays; the profiler normalizes cost against this budget. Larger values can reduce dark truncation artifacts but increase GPU work and frame time. They do not change the path bounce count or remove the 20-entry traversal-stack limit.
 
@@ -85,10 +68,10 @@ Set `march_budget = 1024` in `config.toml` to allow longer rays before traversal
 cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
-cargo run --release --locked -- --smoke-test
+cargo test --release --locked --test smoke -- --ignored --nocapture
 ```
 
-Unit tests check the packed tree against the terrain height field, noise bounds, configuration validation, and WGSL shader validity. GPU smoke tests require a graphics adapter and run without a window. They execute compute and presentation passes, check sampler distributions and analytic lighting integrals, test closed/open-room visibility, exercise both spatial sampling modes, and verify deterministic replay, accumulation, frozen dynamic trees, allocation exhaustion, and reset behavior. Preview PNGs are written to `target/smoke/`.
+Integration tests check terrain occupancy and height cutoffs, malformed octree rejection, compaction, configuration validation, and WGSL shader validity. GPU smoke tests are ignored by default, require a graphics adapter, and run without a window. They execute compute and presentation passes, check sampler distributions and analytic lighting integrals, test closed/open-room visibility, exercise both spatial sampling modes, and verify deterministic replay, accumulation, read-only geometry, compaction, and reset behavior. Preview PNGs are written to `target/smoke/`.
 
 To isolate sun illumination, set `sky_intensity = 0.0` in `config.toml` and enter path-tracing mode. The small sun disk contributes relatively little integrated energy at the default radiance. Increase `sun_intensity`, for example to `100.0`, to make sunlight more apparent without changing its angular size or sampling PDFs. Both intensity defaults are `1.0`.
 

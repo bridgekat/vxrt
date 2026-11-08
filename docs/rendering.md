@@ -5,33 +5,35 @@
 | File | Responsibility |
 | --- | --- |
 | `src/main.rs` | Command-line entry points and logging |
+| `src/lib.rs` | Shared configuration, terrain, shaders, and renderer API |
+| `tests/config.rs`, `tests/world.rs`, `tests/octree.rs`, `tests/shaders.rs` | Configuration, terrain, octree, and shader integration checks |
 | `src/app.rs` | Window, input, camera motion, surface presentation, and event loop |
 | `src/config.rs` | TOML configuration and parameter validation |
-| `src/world.rs` | Static terrain, packed octree construction, and dynamic noise maps |
-| `src/renderer.rs` | GPU resources, dispatch, accumulation state, readback, and screenshots |
+| `src/world.rs` | CPU terrain generation and packed octree construction |
+| `src/renderer.rs` | GPU resources, dispatch, accumulation state, and tree upload |
+| `src/renderer/readback.rs` | GPU readback and screenshots |
+| `src/octree.rs` | CPU validation and compaction of packed trees |
 | `src/shaders.rs` | Embedded GPU program assembly |
-| `src/smoke.rs` | GPU rendering checks, controlled scenes, and preview generation |
-| `src/sampling_checks.rs` / `tests/sampling.wgsl` | GPU sampling diagnostics against analytic integrals |
+| `tests/smoke.rs` | GPU rendering checks, controlled scenes, and preview generation |
+| `tests/support/sampling.rs` / `tests/support/sampling.wgsl` | GPU sampling diagnostics against analytic integrals |
 | `shaders/sampling.wgsl` | Sample dimensions, direction distributions, PDFs, and MIS weights |
-| `shaders/main.wgsl` | Terrain generation, traversal, interactive shading, and path tracing |
+| `shaders/main.wgsl` | Traversal, interactive shading, and path tracing |
 | `shaders/present.wgsl` | Fullscreen presentation and gamma encoding |
 
 ## Terrain and octree representation
 
-A world is a cube with side length `2^world_levels`. The tree buffer begins with a 32-bit allocation count followed by 32-bit node words. Low bits encode node state; upper bits hold either a child pointer or a leaf material:
+A world is a cube with side length `2^world_levels`. The tree buffer begins with a 32-bit node count followed by 32-bit node words. Low bits encode node state; upper bits hold either a child pointer or a leaf material:
 
 | Node word | Meaning |
 | --- | --- |
-| `0` | Ungenerated node |
-| `1` | Locked or unresolved coarse node |
 | `(child_pointer << 2) \| 1` | Internal node with eight contiguous children |
 | `(material << 2) \| 3` | Leaf; material zero is empty and nonzero is solid |
 
 Child indices encode X, Y, and Z in bits 0, 1, and 2 respectively.
 
-Static terrain uses five-octave interpolated noise, a composed height function with a +64 offset, and a maximum-height cutoff. Integer hash arithmetic explicitly wraps. The CPU builds the tree and merges identical leaf children bottom-up before upload.
+Terrain uses five-octave interpolated noise, a composed height function with a +64 offset, and an exclusive maximum-height cutoff: voxels with `y >= max_height` are empty, including at leaf resolution. Integer hash arithmetic explicitly wraps. The CPU builds the tree and merges identical leaf children bottom-up before upload.
 
-Interactive dynamic terrain uses seeded noise textures with min/max mipmaps to bound heights. Nodes are generated lazily with atomic operations and view-dependent level of detail (LOD). A bounded compare-and-swap loop allocates children without exceeding capacity. Free slots are zeroed before dispatch, including after compaction, so publishing a parent pointer does not depend on cross-invocation visibility of child-initialization writes. Allocation exhaustion leaves coarse opaque placeholders. Tree checking and compaction synchronize with the GPU before reading node data.
+The GPU reads the completed tree without modifying it. View-dependent level of detail (LOD) can stop traversal at an internal node and treat that region as a coarse opaque cell. Tree checking and compaction synchronize with the GPU before reading node data. CPU validation checks the header, node tags, pointer bounds, repeated references, and depth. Compaction removes unreachable storage and merges identical leaf children. Replacement trees are validated before upload and must fit the existing GPU buffer; uploading resets accumulation.
 
 ## Interactive rendering
 
@@ -39,18 +41,18 @@ The camera uses inverse perspective and rotation matrices to construct rays. Mov
 
 Interactive frames execute two compute passes with 8×8 workgroups. The first casts a coarse grid of beams at four-pixel spacing. The second uses neighboring beam distances to skip empty space before tracing full-resolution rays. The beam grid includes an extra row and column beyond its rounded-up viewport coverage. Separate parameter buffers and compute passes provide distinct dispatch parameters and ordered storage access.
 
-Traversal uses a 20-entry stack and a configurable `march_budget` (default 256, allowed range 1–65536) per ray. The setting applies to beam, interactive, path-continuation, and shadow rays. Box intersections and test-point offsets determine movement between tree nodes. Interactive shading combines a directional sun, sky colors, a normal-dependent palette, and voxel edge outlines. Dynamic terrain uses height-gradient shading normals. The profiler view displays per-pixel traversal iteration cost. Each interactive frame overwrites the color buffer.
+Traversal uses a 20-entry stack and a configurable `march_budget` (default 256, allowed range 1–65536) per ray. The setting applies to beam, interactive, path-continuation, and shadow rays. Box intersections and test-point offsets determine movement between tree nodes. Interactive shading applies a directional diffuse factor to neutral surfaces with albedo 0.8 using geometric voxel-face normals, with sky color for misses and traversal-cost fading. Surfaces have no grid overlay. The profiler view displays per-pixel traversal iteration cost. Each interactive frame overwrites the color buffer.
 
 ## Path tracing
 
-Path tracing freezes the camera and dynamic tree. Ungenerated and unresolved nodes are treated as opaque coarse cells; no nodes are allocated while accumulating. Explore the scene in interactive mode to generate detail before pressing **P**. Returning to interactive mode resumes generation. This keeps geometry and camera-dependent LOD stable throughout an accumulation sequence.
+Path tracing freezes the camera so geometry and camera-dependent LOD stay stable throughout an accumulation sequence. The terrain is fully constructed before either rendering mode begins.
 
-Path rays trace from the camera without beam skipping. Camera jitter samples uniformly within each pixel's footprint. Transport uses normalized geometric voxel-face normals and a Lambertian BRDF `albedo / pi`. Terrain-gradient normals remain an interactive shading feature; using face normals for transport avoids sampling through the geometric surface.
+Path rays trace from the camera without beam skipping. Camera jitter samples uniformly within each pixel's footprint. Transport uses normalized geometric voxel-face normals and a neutral Lambertian BRDF `0.8 / pi` (constant RGB albedo 0.8).
 
 At every surface:
 
-1. Sample one direction uniformly in solid angle over the solar disk. For half-angle `a = 0.05` radians, its PDF is `1 / (2*pi*(1-cos(a)))` inside the cone and zero outside. A shadow ray tests visibility. The contribution is `throughput * (albedo/pi) * sun_radiance * max(dot(normal, direction), 0) / light_pdf` multiplied by its MIS weight.
-2. Sample a cosine-weighted hemisphere around the surface normal. Its PDF is `max(dot(normal, direction), 0) / pi`, so the continuation throughput simplifies to multiplication by `albedo`.
+1. Sample one direction uniformly in solid angle over the solar disk. For half-angle `a = 0.05` radians, its PDF is `1 / (2*pi*(1-cos(a)))` inside the cone and zero outside. A shadow ray tests visibility. The contribution is `throughput * (0.8/pi) * sun_radiance * max(dot(normal, direction), 0) / light_pdf` multiplied by its MIS weight.
+2. Sample a cosine-weighted hemisphere around the surface normal. Its PDF is `max(dot(normal, direction), 0) / pi`, so the continuation throughput is multiplied by 0.8 before roulette.
 3. Combine light and scattering samples with the power heuristic, `pdf_a² / (pdf_a² + pdf_b²)`. A continuation ray escaping toward the solar disk receives the complementary scattering weight. Outside the solar disk, the light PDF is zero and the escape contribution has weight one. Camera rays see the environment without MIS weighting.
 4. After three surface bounces, apply Russian roulette. Survival probability is the largest throughput component clamped to `[0.05, 0.95]`; surviving paths divide throughput by that probability. Terminated paths return only radiance already collected. There is no fixed bounce cutoff and no sky contribution without an escaping ray.
 
@@ -62,9 +64,9 @@ The estimator follows the standard combination of light sampling, cosine-weighte
 
 `sky_intensity` and `sun_intensity` are independent nonnegative linear-radiance multipliers, both defaulting to 1.0. Sky intensity affects the environment outside the solar disk. Sun intensity affects the disk seen by both camera/scattering rays and explicit light samples. Changing intensity does not change the cone PDF or MIS weights.
 
-The sun disk's half-angle is 0.05 radians, so its solid angle is approximately 0.00785 steradians. Its radiance is only modestly higher than the sky radiance; consequently, its integrated illumination is weak. For an unoccluded horizontal Lambertian plane with normal `n` and sun axis `s`, the reflected solar radiance is `albedo * sun_radiance * dot(n,s) * sin(0.05)^2` when the whole disk is above the horizon.
+The sun disk's half-angle is 0.05 radians, so its solid angle is approximately 0.00785 steradians. Its radiance is only modestly higher than the sky radiance; consequently, its integrated illumination is weak. For an unoccluded horizontal Lambertian plane with normal `n` and sun axis `s`, the reflected solar radiance is `0.8 * sun_radiance * dot(n,s) * sin(0.05)^2` when the whole disk is above the horizon.
 
-To view sunlight against a black sky, use `sky_intensity = 0.0` and optionally raise `sun_intensity` to `100.0`. Frozen dynamic scenes can still contain coarse unresolved cells that block secondary rays.
+To view sunlight against a black sky, use `sky_intensity = 0.0` and optionally raise `sun_intensity` to `100.0`.
 
 ## Sample sequences and spatial coherence
 
@@ -82,16 +84,16 @@ Color and beam data reside in storage buffers. The presentation shader bilinearl
 
 ## Validation and limits
 
-`cargo test --locked` checks CPU terrain and bounds, configuration constraints, and the render and diagnostic shaders. `cargo run --release --locked -- --smoke-test` also checks:
+`cargo test --locked` runs integration tests for terrain occupancy and height cutoffs, malformed octree rejection, compaction preservation and idempotence, configuration constraints, and the render and diagnostic shaders. The GPU smoke test is ignored by default because it requires a graphics adapter. `cargo test --release --locked --test smoke -- --ignored --nocapture` also checks:
 
 - Hemisphere support, normalized directions, cone solid-angle moments, sample range, dimension decorrelation, and seed/index/pixel separation.
 - Shared bounce values with per-pixel camera jitter in coherent mode, and distinct bounce values in decorrelated mode.
 - MIS estimates against analytic integrals for an aligned sun, a tilted sun, a sun centered on the horizon, and a constant environment. Distribution checks use 65,536 samples; integral tolerances are 2%.
-- Finite nonnegative transport, exact sample replay on the same adapter, numerical accumulation, frozen dynamic trees, camera/resize resets, compaction, and allocation exhaustion in both sampling modes.
+- Finite nonnegative transport, exact sample replay on the same adapter, numerical accumulation, read-only geometry, camera/resize resets, and compaction in both sampling modes.
 - Configurable march budgets through the complete GPU pipeline: a deliberately truncated empty-world ray and its successful completion with a larger budget.
 - A fully enclosed non-emissive room receiving zero environment light, and an open room receiving positive light.
 
-The renderer still approximates geometry through LOD and coarse placeholders. Freezing a dynamic tree can leave secondary-ray regions under-detailed. Traversal-budget failures can darken an image; the transport equations do not remove that geometric/traversal approximation. Floating-point backend differences and interactive generation order can affect results. GPU diagnostics are correctness checks, not a cross-backend image-equivalence or performance benchmark. Collision detection is not implemented.
+The renderer still approximates geometry through camera-dependent LOD, including for secondary rays. Traversal-budget failures can darken an image; the transport equations do not remove that geometric/traversal approximation. Floating-point backend differences can affect results. GPU diagnostics are correctness checks, not a cross-backend image-equivalence or performance benchmark. Collision detection is not implemented.
 
 ## Handling traversal limits
 
@@ -109,8 +111,8 @@ While a sample is pending, presentation can retain the last completed estimate o
 
 1. **Measure image quality and cost together.** Fix scene, camera, seed, exposure, and sampling mode. Compare equal-time error against a high-sample reference; measure beam traversal, path traversal, and presentation independently. Include traversal-budget failures and coarse-node counts in diagnostics.
 2. **Benchmark coherent versus decorrelated sampling.** Measure both GPU time and spatial noise, including any denoiser. Evaluate scrambled low-discrepancy sequences as an additional option while retaining deliberate spatial coherence where useful.
-3. **Improve frozen-scene coverage.** Add a generation warm-up or explicit refinement step covering shadow and indirect paths before accumulation. Provide visible feedback when the frozen tree contains unresolved cells.
-4. **Validate and optimize traversal.** Compare traversal with a simple oracle at grazing angles, corners, and beam boundaries. Profile memory locality, allocation, and compaction before changing algorithms.
+3. **Evaluate LOD accuracy.** Compare coarse traversal against full-detail geometry, especially for shadow and indirect paths. Measure the cost of retaining finer detail for secondary rays.
+4. **Validate and optimize traversal.** Compare traversal with a simple oracle at grazing angles, corners, and beam boundaries. Profile memory locality and compaction before changing algorithms.
 5. **Extend transport deliberately.** Consider environment importance sampling, more material models, shading-normal corrections, adaptive sampling, and denoising with variance tracking. Keep analytic and enclosed-scene regression tests for every estimator change.
 
 ## Evaluating MCMC sampling

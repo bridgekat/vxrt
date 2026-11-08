@@ -1,24 +1,28 @@
 //! Actual GPU execution, including unaligned viewport edges and accumulation lifecycle.
-use crate::{config::Config, renderer::Renderer};
+mod support;
 use anyhow::{Result, ensure};
 use cgmath::Vector3;
-pub async fn run() -> Result<()> {
+use vxrt::{config::Config, renderer::Renderer};
+#[test]
+#[ignore = "requires a graphics adapter; run with --release --test smoke -- --ignored"]
+fn gpu_rendering() -> Result<()> {
+    pollster::block_on(run())
+}
+
+async fn run() -> Result<()> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions::default())
         .await?;
-    for (dynamic, coherent_sampling) in [(false, true), (true, true), (false, false), (true, false)]
-    {
+    for coherent_sampling in [true, false] {
         let config = Config {
-            dynamic,
-            max_nodes: 65536,
             coherent_sampling,
             ..Default::default()
         };
         let mut r =
             Renderer::new(&adapter, config, 65, 37, wgpu::TextureFormat::Rgba8Unorm).await?;
-        if !dynamic && coherent_sampling {
-            crate::sampling_checks::check(&r).await?;
+        if coherent_sampling {
+            support::sampling::check(&r).await?;
         }
         let target = r.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("smoke presentation"),
@@ -51,18 +55,16 @@ pub async fn run() -> Result<()> {
         );
         let (allocated, reachable) = r.check_tree()?;
         ensure!(allocated >= reachable as u32, "bad tree count");
-        // Compact at a GPU synchronization point. Dynamic generation remains enabled.
+        // Verify compaction preserves the rendered geometry.
         r.compact_tree()?;
         r.render(position, rotation, false, false, 0, None);
-        if !dynamic {
-            ensure!(
-                r.read_frame()? == pixels,
-                "compaction changed static rendering"
-            );
-        }
+        ensure!(
+            r.read_frame()? == pixels,
+            "compaction changed static rendering"
+        );
         r.render(position, rotation, true, false, 0, None);
         let a = r.read_frame()?;
-        let frozen_tree = r.check_tree()?;
+        let tree_stats = r.check_tree()?;
         r.render(position, rotation, true, false, 1, None);
         let average = r.read_frame()?;
         ensure!(r.samples == 2, "path sample counter");
@@ -70,7 +72,7 @@ pub async fn run() -> Result<()> {
         r.render(position, rotation, true, false, 1, None);
         let b = r.read_frame()?;
         ensure!(
-            r.check_tree()? == frozen_tree,
+            r.check_tree()? == tree_stats,
             "path tracing mutated the tree"
         );
         ensure!(
@@ -84,14 +86,12 @@ pub async fn run() -> Result<()> {
                 .all(|v| v.is_finite() && *v >= 0.0),
             "invalid path energy"
         );
-        {
-            for ((a, b), avg) in a.iter().zip(&b).zip(&average) {
-                for c in 0..3 {
-                    ensure!(
-                        (avg[c] - (a[c] + b[c]) * 0.5).abs() < 1e-5,
-                        "accumulation mismatch"
-                    );
-                }
+        for ((a, b), avg) in a.iter().zip(&b).zip(&average) {
+            for c in 0..3 {
+                ensure!(
+                    (avg[c] - (a[c] + b[c]) * 0.5).abs() < 1e-5,
+                    "accumulation mismatch"
+                );
             }
         }
         r.samples = 0;
@@ -101,12 +101,10 @@ pub async fn run() -> Result<()> {
         ensure!(r.samples == 1, "camera change failed to reset accumulation");
         r.render(position, rotation, false, false, 0, None);
         ensure!(r.samples == 0, "interactive mode must not accumulate");
-        if !dynamic {
-            ensure!(
-                r.read_frame()? == pixels,
-                "path history leaked into interactive rendering"
-            );
-        }
+        ensure!(
+            r.read_frame()? == pixels,
+            "path history leaked into interactive rendering"
+        );
         r.resize(64, 32)?;
         ensure!(r.samples == 0, "resize must reset samples");
         r.render(position, rotation, true, false, 2, None);
@@ -118,31 +116,17 @@ pub async fn run() -> Result<()> {
         r.resize(321, 181)?;
         r.render(position, rotation, false, false, 0, None);
         std::fs::create_dir_all("target/smoke")?;
-        r.save_png(format!(
-            "target/smoke/{dynamic}-{coherent_sampling}-interactive.png"
-        ))?;
+        r.save_png(format!("target/smoke/{coherent_sampling}-interactive.png"))?;
         for i in 0..32 {
             r.render(position, rotation, true, false, i, None);
         }
-        r.save_png(format!(
-            "target/smoke/{dynamic}-{coherent_sampling}-path.png"
-        ))?;
+        r.save_png(format!("target/smoke/{coherent_sampling}-path.png"))?;
         check_enclosed_room(&mut r)?;
-        tracing::info!(
-            dynamic,
-            coherent_sampling,
-            allocated,
-            reachable,
-            "GPU smoke passed"
-        );
+        tracing::info!(coherent_sampling, allocated, reachable, "GPU smoke passed");
     }
     let mut tiny = Renderer::new(
         &adapter,
-        Config {
-            dynamic: true,
-            max_nodes: 9,
-            ..Default::default()
-        },
+        Config::default(),
         17,
         13,
         wgpu::TextureFormat::Rgba8Unorm,
@@ -158,14 +142,6 @@ pub async fn run() -> Result<()> {
             None,
         );
     }
-    ensure!(
-        tiny.check_tree()?.0 <= 9,
-        "dynamic allocator exceeded its capacity"
-    );
-    ensure!(
-        tiny.read_frame()?.iter().flatten().all(|f| f.is_finite()),
-        "exhausted tree produced non-finite output"
-    );
     tiny.resize(1, 1)?;
     tiny.render(
         Vector3::new(128.0, 258.0, 240.0),
@@ -189,8 +165,8 @@ pub async fn run() -> Result<()> {
         let mut r = Renderer::new(
             &adapter,
             Config {
-                dynamic: true,
-                max_nodes: 9,
+                world_levels: 1,
+                max_height: 2,
                 march_budget,
                 ..Default::default()
             },
@@ -201,7 +177,7 @@ pub async fn run() -> Result<()> {
         .await?;
         r.write_tree(&[1, 3])?;
         r.render(
-            Vector3::new(128.0, 128.0, 128.0),
+            Vector3::new(1.0, 1.0, 1.0),
             [0.0, 0.0],
             true,
             false,
@@ -219,7 +195,7 @@ pub async fn run() -> Result<()> {
         }
     }
     println!(
-        "GPU smoke passed: static/dynamic rendering, accumulation, resize, compaction, allocation exhaustion, and configurable march budget. Images: target/smoke/"
+        "GPU smoke passed: static rendering, accumulation, resize, compaction, and configurable march budget. Images: target/smoke/"
     );
     Ok(())
 }

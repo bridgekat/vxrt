@@ -1,10 +1,10 @@
 //! GPU sampling checks against analytic integrals, independent of scene appearance.
-use crate::renderer::Renderer;
 use anyhow::{Result, ensure};
+use vxrt::renderer::Renderer;
 const SOURCE: &str = concat!(
-    include_str!("../shaders/sampling.wgsl"),
+    include_str!("../../shaders/sampling.wgsl"),
     "\n",
-    include_str!("../tests/sampling.wgsl")
+    include_str!("sampling.wgsl")
 );
 pub async fn check(renderer: &Renderer) -> Result<()> {
     let device = &renderer.device;

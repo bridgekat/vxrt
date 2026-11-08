@@ -1,4 +1,3 @@
-use crate::{config::Config, renderer::Renderer};
 use anyhow::{Context, Result};
 use cgmath::{Deg, Matrix3, Vector3};
 use std::{
@@ -6,6 +5,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use vxrt::{config::Config, renderer::Renderer};
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, ElementState, WindowEvent},

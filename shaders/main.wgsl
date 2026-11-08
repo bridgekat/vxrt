@@ -33,7 +33,6 @@ var<storage, read_write> frame: array<vec4<f32>>;
 @group(0) @binding(3)
 var<storage, read_write> beams: array<f32>;
 
-const GAMMA = 2.2;
 const ALBEDO = 0.8;
 
 struct Intersection {
@@ -65,10 +64,31 @@ fn inside(a: vec3<f32>, box: vec4<f32>) -> bool {
 
 fn sky(d: vec3<f32>) -> vec3<f32> {
     let dir = normalize(d);
-    if dot(- sun_dir(), dir) >= cos(SUN_ANGLE / 2.0) {
-        return p.lighting.z * pow(vec3<f32>(1.0), vec3<f32>(GAMMA));
+    let sun = - sun_dir();
+    let mu = clamp(dot(sun, dir), - 1.0, 1.0);
+    if mu >= cos(SUN_ANGLE / 2.0) {
+        return vec3<f32>(p.lighting.z);
     }
-    return p.lighting.y * mix(pow(vec3<f32>(152.0, 211.0, 250.0) / 255.0, vec3<f32>(GAMMA)), pow(vec3<f32>(90.0, 134.0, 206.0) / 255.0, vec3<f32>(GAMMA)), smoothstep(0.0, 1.0, dir.y * 2.0));
+    // Sea-level RGB scattering coefficients (1/m), integrated over exponential
+    // density profiles with Rayleigh/Mie scale heights of 8 km / 1.2 km.
+    let rayleigh = vec3<f32>(5.8e-6, 13.5e-6, 33.1e-6) * 8000.0;
+    let mie = vec3<f32>(21.0e-6) * 1200.0;
+    let extinction = rayleigh + mie;
+    // Approximate curved-atmosphere air mass, finite at the horizon. Extend
+    // horizon density below it for environment rays escaping the voxel world.
+    let elevation = max(dir.y, 0.0);
+    let air_mass = 1.0 / sqrt(elevation * elevation + 0.0025);
+    let sun_air_mass = 1.0 / sqrt(max(sun.y, 0.0) * max(sun.y, 0.0) + 0.0025);
+    let transmittance = exp(- extinction * air_mass);
+    // Evaluate solar attenuation at a representative midpoint of the column.
+    let sunlight = exp(- extinction * (0.5 * sun_air_mass));
+    let rayleigh_phase = 3.0 * (1.0 + mu * mu) / (16.0 * PI);
+    // Henyey-Greenstein phase function models forward scattering by aerosols.
+    let g = 0.76;
+    let mie_phase = (1.0 - g * g) / (4.0 * PI * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
+    let scattering = (rayleigh * rayleigh_phase + mie * mie_phase) / extinction;
+    // Art-directed solar exposure; keep radiance linear for path accumulation.
+    return p.lighting.y * 12.0 * sunlight * scattering * (vec3<f32>(1.0) - transmittance);
 }
 
 var<private> pixel_index: u32;

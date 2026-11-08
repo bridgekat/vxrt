@@ -58,6 +58,14 @@ Shadow and continuation rays start at the surface boundary with a test point in 
 
 The estimator follows the standard combination of light sampling, cosine-weighted scattering, and multiple importance sampling. [PBRT: A Better Path Tracer](https://pbr-book.org/4ed/Light_Transport_I_Surface_Reflection/A_Better_Path_Tracer) The hemisphere and cone PDFs are expressed with respect to solid angle. [PBRT: Sampling Multidimensional Functions](https://pbr-book.org/4ed/Sampling_Algorithms/Sampling_Multidimensional_Functions)
 
+## Lighting controls and sun visibility
+
+`sky_intensity` and `sun_intensity` are independent nonnegative linear-radiance multipliers, both defaulting to 1.0. Sky intensity affects the environment outside the solar disk. Sun intensity affects the disk seen by both camera/scattering rays and explicit light samples. Changing intensity does not change the cone PDF or MIS weights.
+
+The sun disk's half-angle is 0.05 radians, so its solid angle is approximately 0.00785 steradians. Its radiance is only modestly higher than the sky radiance; consequently, its integrated illumination is weak. For an unoccluded horizontal Lambertian plane with normal `n` and sun axis `s`, the reflected solar radiance is `albedo * sun_radiance * dot(n,s) * sin(0.05)^2` when the whole disk is above the horizon.
+
+To view sunlight against a black sky, use `sky_intensity = 0.0` and optionally raise `sun_intensity` to `100.0`. Frozen dynamic scenes can still contain coarse unresolved cells that block secondary rays.
+
 ## Sample sequences and spatial coherence
 
 Samples are stateless integer-hash functions of seed, sample index, dimension, and a pixel key. Each value lies strictly inside `(0,1)`. Dimensions 0–1 provide camera jitter. Every bounce has five distinct dimensions: two for the light sample, two for the scattering sample, and one for roulette. Time and floating-point bit patterns do not index the sequence.

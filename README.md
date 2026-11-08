@@ -60,6 +60,8 @@ cargo run --locked -- --print-config > config.toml
 | `render_height` | `0` | Render height in pixels; zero follows the window |
 | `seed` | `1` | Seed for path samples and dynamic terrain noise; static terrain geometry uses a fixed height function |
 | `coherent_sampling` | `true` | Share bounce samples across pixels; `false` decorrelates them. Camera jitter is always per-pixel |
+| `sky_intensity` | `1.0` | Nonnegative linear multiplier for sky radiance outside the sun disk; zero makes it black |
+| `sun_intensity` | `1.0` | Nonnegative linear multiplier for the sun disk radiance |
 
 `noise_levels` must not exceed `world_levels + partial_levels`. Static generation grows cubically with world size. The default dynamic allocation budget occupies 64 MiB plus a four-byte header. GPU buffer limits also constrain the node budget and render resolution.
 
@@ -86,5 +88,7 @@ cargo run --release --locked -- --smoke-test
 ```
 
 Unit tests check the packed tree against the terrain height field, noise bounds, configuration validation, and WGSL shader validity. GPU smoke tests require a graphics adapter and run without a window. They execute compute and presentation passes, check sampler distributions and analytic lighting integrals, test closed/open-room visibility, exercise both spatial sampling modes, and verify deterministic replay, accumulation, frozen dynamic trees, allocation exhaustion, and reset behavior. Preview PNGs are written to `target/smoke/`.
+
+To isolate sun illumination, set `sky_intensity = 0.0` in `config.toml` and enter path-tracing mode. The small sun disk contributes relatively little integrated energy at the default radiance. Increase `sun_intensity`, for example to `100.0`, to make sunlight more apparent without changing its angular size or sampling PDFs. Both intensity defaults are `1.0`.
 
 See [rendering architecture and development priorities](docs/rendering.md) for algorithm details, limitations, and sampling recommendations.

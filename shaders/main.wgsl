@@ -10,7 +10,7 @@ struct Params  {
     world: vec4<u32>,
     // dynamic, max nodes, max levels, noise levels
     misc: vec4<f32>,
-    // partial levels, LOD quality, reserved
+    // partial levels, LOD quality, sky intensity, sun intensity
     sampling: vec4<u32>,
     // sample index, seed, accumulated count, coherent bounce samples
 }
@@ -55,9 +55,9 @@ fn inside(a:vec3<f32>,box:vec4<f32>)->bool  {
 fn sky(d:vec3<f32>)->vec3<f32>  {
     let dir=normalize(d);
     if dot(-sun_dir(),dir)>=cos(SUN_ANGLE/2.0)  {
-        return pow(vec3<f32>(1.0,0.7,0.5)*1.5,vec3<f32>(GAMMA));
+        return p.misc.w * pow(vec3<f32>(1.0,0.7,0.5)*1.5,vec3<f32>(GAMMA));
     }
-    return mix(pow(vec3<f32>(152.0,211.0,250.0)/255.0,vec3<f32>(GAMMA)),pow(vec3<f32>(90.0,134.0,206.0)/255.0,vec3<f32>(GAMMA)),smoothstep(0.0,1.0,dir.y*2.0));
+    return p.misc.z * mix(pow(vec3<f32>(152.0,211.0,250.0)/255.0,vec3<f32>(GAMMA)),pow(vec3<f32>(90.0,134.0,206.0)/255.0,vec3<f32>(GAMMA)),smoothstep(0.0,1.0,dir.y*2.0));
 }
 fn palette(normal:vec3<f32>)->vec3<f32>  {
     let side=pow(vec3<f32>(147.5,166.4,77.0)/255.0,vec3<f32>(GAMMA));

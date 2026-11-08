@@ -16,6 +16,8 @@ pub struct Config {
     pub render_height: u32,
     pub seed: u32,
     pub coherent_sampling: bool,
+    pub sky_intensity: f32,
+    pub sun_intensity: f32,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -32,6 +34,8 @@ impl Default for Config {
             render_height: 0,
             seed: 1,
             coherent_sampling: true,
+            sky_intensity: 1.0,
+            sun_intensity: 1.0,
         }
     }
 }
@@ -47,6 +51,13 @@ impl Config {
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.sky_intensity.is_finite()
+                && self.sky_intensity >= 0.0
+                && self.sun_intensity.is_finite()
+                && self.sun_intensity >= 0.0,
+            "sky_intensity and sun_intensity must be finite and nonnegative"
+        );
         ensure!(
             (1..=20).contains(&self.world_levels),
             "world_levels must be 1..=20 (traversal stack capacity)"
@@ -87,6 +98,14 @@ mod tests {
     fn rejects_invalid_shader_parameters() {
         for config in [
             Config {
+                sky_intensity: -1.0,
+                ..Default::default()
+            },
+            Config {
+                sun_intensity: f32::NAN,
+                ..Default::default()
+            },
+            Config {
                 world_levels: 21,
                 ..Default::default()
             },
@@ -110,5 +129,12 @@ mod tests {
             assert!(config.validate().is_err());
         }
         Config::default().validate().unwrap();
+        Config {
+            sky_intensity: 0.0,
+            sun_intensity: 0.0,
+            ..Default::default()
+        }
+        .validate()
+        .unwrap();
     }
 }

@@ -415,8 +415,8 @@ impl Renderer {
             misc: [
                 self.config.partial_levels as f32,
                 self.config.lod_quality,
-                0.0,
-                0.0,
+                self.config.sky_intensity,
+                self.config.sun_intensity,
             ],
             sampling: [
                 sample_index,

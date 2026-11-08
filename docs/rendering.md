@@ -35,11 +35,11 @@ Interactive dynamic terrain uses seeded noise textures with min/max mipmaps to b
 
 ## Interactive rendering
 
-The camera uses inverse perspective and rotation matrices to construct rays. Movement advances at 30 Hz with interpolation between updates. The initial camera position is centered above the world.
+The camera uses inverse perspective and rotation matrices to construct rays. Movement is always free flight and advances at 30 Hz with interpolation between updates. The initial camera position is centered above the world.
 
 Interactive frames execute two compute passes with 8×8 workgroups. The first casts a coarse grid of beams at four-pixel spacing. The second uses neighboring beam distances to skip empty space before tracing full-resolution rays. The beam grid includes an extra row and column beyond its rounded-up viewport coverage. Separate parameter buffers and compute passes provide distinct dispatch parameters and ordered storage access.
 
-Traversal uses a 20-entry stack and a 256-iteration budget. Box intersections and test-point offsets determine movement between tree nodes. Interactive shading combines a directional sun, sky colors, a normal-dependent palette, and voxel edge outlines. Dynamic terrain uses height-gradient shading normals. The profiler view displays per-pixel traversal iteration cost. Each interactive frame overwrites the color buffer.
+Traversal uses a 20-entry stack and a configurable `march_budget` (default 256, allowed range 1–65536) per ray. The setting applies to beam, interactive, path-continuation, and shadow rays. Box intersections and test-point offsets determine movement between tree nodes. Interactive shading combines a directional sun, sky colors, a normal-dependent palette, and voxel edge outlines. Dynamic terrain uses height-gradient shading normals. The profiler view displays per-pixel traversal iteration cost. Each interactive frame overwrites the color buffer.
 
 ## Path tracing
 
@@ -88,9 +88,22 @@ Color and beam data reside in storage buffers. The presentation shader bilinearl
 - Shared bounce values with per-pixel camera jitter in coherent mode, and distinct bounce values in decorrelated mode.
 - MIS estimates against analytic integrals for an aligned sun, a tilted sun, a sun centered on the horizon, and a constant environment. Distribution checks use 65,536 samples; integral tolerances are 2%.
 - Finite nonnegative transport, exact sample replay on the same adapter, numerical accumulation, frozen dynamic trees, camera/resize resets, compaction, and allocation exhaustion in both sampling modes.
+- Configurable march budgets through the complete GPU pipeline: a deliberately truncated empty-world ray and its successful completion with a larger budget.
 - A fully enclosed non-emissive room receiving zero environment light, and an open room receiving positive light.
 
 The renderer still approximates geometry through LOD and coarse placeholders. Freezing a dynamic tree can leave secondary-ray regions under-detailed. Traversal-budget failures can darken an image; the transport equations do not remove that geometric/traversal approximation. Floating-point backend differences and interactive generation order can affect results. GPU diagnostics are correctness checks, not a cross-backend image-equivalence or performance benchmark. Collision detection is not implemented.
+
+## Handling traversal limits
+
+Set `march_budget` in `config.toml` and restart to adjust the limit. Larger budgets allow more work per ray, at the cost of longer frames; profiler values are normalized by the configured budget. The setting limits traversal iterations, not path bounces or stack depth.
+
+The current path tracer returns radiance already collected when a continuation ray exceeds the traversal budget; the unknown remainder contributes zero. Failure on the camera ray therefore produces black. A shadow-ray failure likewise omits that direct-light contribution. This is conservative about visibility but introduces dark bias.
+
+A more robust design would distinguish `hit`, `miss`, and `pending` results. Pending rays could resume from stored traversal/path state in later dispatches until visibility is resolved. This turns the per-dispatch step limit into a scheduling limit instead of a transport cutoff. The saved state must cover shadow rays as well as continuation rays, including pending direct-light contributions, throughput, sample dimensions, and MIS data. Queued path state is a standard GPU rendering organization. [PBRT: Mapping Path Tracing to the GPU](https://www.pbr-book.org/4ed/Wavefront_Rendering_on_GPUs/Mapping_Path_Tracing_to_the_GPU)
+
+A simpler first step would retry only failed samples with a larger step budget, using the same sample index and dimensions. Do not accumulate the failed partial result and then add the retried result again. Unfinished samples need to remain pending; track completed-sample counts per pixel, or finish the entire sample wave before advancing a shared count. Retrying still needs bounded dispatch times and a policy for persistently expensive rays.
+
+While a sample is pending, presentation can retain the last completed estimate or show a separate diagnostic overlay. That displayed value must not be counted as another sample. Permanently discarding failures instead of retrying can bias the result toward short/easy paths. Substituting the sky can leak light through occluders; coarse geometry or cached lighting is a deliberate preview approximation rather than a correctness fix.
 
 ## Development priorities
 

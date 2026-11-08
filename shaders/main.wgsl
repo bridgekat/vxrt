@@ -13,6 +13,7 @@ struct Params  {
     // partial levels, LOD quality, sky intensity, sun intensity
     sampling: vec4<u32>,
     // sample index, seed, accumulated count, coherent bounce samples
+    traversal: vec4<u32>, // march budget, reserved
 }
 struct Tree  {
     count: atomic<u32>, data: array<atomic<u32>>
@@ -26,7 +27,6 @@ struct Tree  {
 @group(0) @binding(6) var min_tex: texture_2d<f32>;
 @group(0) @binding(7) var<storage, read_write> beams: array<f32>;
 const GAMMA=2.2;
-const MAX_ITERATIONS=256u;
 struct Intersection  {
     pos:vec3<f32>, offset:vec3<f32>
 }
@@ -220,7 +220,7 @@ fn cast_ray(reference:vec3<f32>,direction:vec3<f32>)->f32  {
         box=vec4<f32>(stack[stp].xyz,root_size/f32(1u<<stp));
         data=bitcast<u32>(stack[stp].w);
     }
-    for(var i=0u;i<MAX_ITERATIONS;i++)  {
+    for(var i=0u;i<p.traversal.x;i++)  {
         while !inside(test_point,box)  {
             if stp==0u  {
                 return -1.0;
@@ -257,7 +257,7 @@ fn cast_ray(reference:vec3<f32>,direction:vec3<f32>)->f32  {
             }
         }
         if data==1u || (data>>2u)!=0u  {
-            return f32(i)/f32(MAX_ITERATIONS);
+            return f32(i)/f32(p.traversal.x);
         }
         let hit=inner_intersect(reference,dir,box);
         test_point=clamp(hit.pos,box.xyz+0.5,box.xyz+box.w-0.5)+hit.offset;

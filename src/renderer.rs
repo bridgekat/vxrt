@@ -15,12 +15,14 @@ struct Params {
     world: [u32; 4],
     misc: [f32; 4],
     sampling: [u32; 4],
+    traversal: [u32; 4],
 }
 const _: () = {
-    assert!(std::mem::size_of::<Params>() == 224);
+    assert!(std::mem::size_of::<Params>() == 240);
     assert!(std::mem::offset_of!(Params, camera) == 128);
     assert!(std::mem::offset_of!(Params, misc) == 192);
     assert!(std::mem::offset_of!(Params, sampling) == 208);
+    assert!(std::mem::offset_of!(Params, traversal) == 224);
 };
 pub struct Renderer {
     pub device: wgpu::Device,
@@ -424,6 +426,7 @@ impl Renderer {
                 self.samples,
                 u32::from(self.config.coherent_sampling),
             ],
+            traversal: [self.config.march_budget, 0, 0, 0],
         };
         self.queue
             .write_buffer(&self.uniforms[0], 0, bytemuck::bytes_of(&params));

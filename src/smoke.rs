@@ -183,8 +183,43 @@ pub async fn run() -> Result<()> {
         tiny.resize(u32::MAX, u32::MAX).is_err(),
         "oversized render target accepted"
     );
+    // An empty root needs one step to reach its boundary and another to report escape.
+    // Check the configured budget through the complete host/uniform/shader path.
+    for march_budget in [1, 2] {
+        let mut r = Renderer::new(
+            &adapter,
+            Config {
+                dynamic: true,
+                max_nodes: 9,
+                march_budget,
+                ..Default::default()
+            },
+            1,
+            1,
+            wgpu::TextureFormat::Rgba8Unorm,
+        )
+        .await?;
+        r.write_tree(&[1, 3])?;
+        r.render(
+            Vector3::new(128.0, 128.0, 128.0),
+            [0.0, 0.0],
+            true,
+            false,
+            0,
+            None,
+        );
+        let pixel = r.read_frame()?[0];
+        if march_budget == 1 {
+            ensure!(pixel[..3] == [0.0; 3], "march budget was not applied");
+        } else {
+            ensure!(
+                pixel[..3].iter().all(|v| v.is_finite() && *v > 0.0),
+                "larger march budget did not finish the ray"
+            );
+        }
+    }
     println!(
-        "GPU smoke passed: static/dynamic rendering, accumulation, resize, compaction, and allocation exhaustion. Images: target/smoke/"
+        "GPU smoke passed: static/dynamic rendering, accumulation, resize, compaction, allocation exhaustion, and configurable march budget. Images: target/smoke/"
     );
     Ok(())
 }

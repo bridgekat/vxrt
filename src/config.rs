@@ -18,6 +18,7 @@ pub struct Config {
     pub coherent_sampling: bool,
     pub sky_intensity: f32,
     pub sun_intensity: f32,
+    pub march_budget: u32,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -36,6 +37,7 @@ impl Default for Config {
             coherent_sampling: true,
             sky_intensity: 1.0,
             sun_intensity: 1.0,
+            march_budget: 256,
         }
     }
 }
@@ -51,6 +53,10 @@ impl Config {
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            (1..=65536).contains(&self.march_budget),
+            "march_budget must be 1..=65536"
+        );
         ensure!(
             self.sky_intensity.is_finite()
                 && self.sky_intensity >= 0.0
@@ -98,6 +104,14 @@ mod tests {
     fn rejects_invalid_shader_parameters() {
         for config in [
             Config {
+                march_budget: 0,
+                ..Default::default()
+            },
+            Config {
+                march_budget: 65537,
+                ..Default::default()
+            },
+            Config {
                 sky_intensity: -1.0,
                 ..Default::default()
             },
@@ -129,6 +143,11 @@ mod tests {
             assert!(config.validate().is_err());
         }
         Config::default().validate().unwrap();
+        for march_budget in [1, 1024, 65536] {
+            let config: Config = toml::from_str(&format!("march_budget = {march_budget}")).unwrap();
+            assert_eq!(config.march_budget, march_budget);
+            config.validate().unwrap();
+        }
         Config {
             sky_intensity: 0.0,
             sun_intensity: 0.0,

@@ -11,7 +11,7 @@ use winit::{
     event::{DeviceEvent, ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::{CursorGrabMode, Fullscreen, Window, WindowId},
+    window::{CursorGrabMode, Window, WindowId},
 };
 
 pub fn run(config: Config) -> Result<()> {
@@ -44,9 +44,6 @@ struct State {
     path: bool,
     locked: bool,
     focused: bool,
-    flying: bool,
-    cross_wall: bool,
-    acceleration_y: f32,
     last_tick: Instant,
     start: Instant,
     title_time: Instant,
@@ -110,9 +107,6 @@ impl State {
             path: false,
             locked: false,
             focused: true,
-            flying: true,
-            cross_wall: false,
-            acceleration_y: 0.0,
             last_tick: Instant::now(),
             start: Instant::now(),
             title_time: Instant::now(),
@@ -146,24 +140,13 @@ impl State {
         }
         while now.duration_since(self.last_tick) >= step {
             self.position += self.velocity;
-            if self.flying || self.cross_wall {
-                self.velocity *= 0.8;
-                self.acceleration_y = 0.0;
-            } else {
-                self.velocity.x *= 0.4;
-                self.velocity.z *= 0.4;
-                self.velocity.y += self.acceleration_y;
-                self.acceleration_y -= 0.005;
-            }
+            self.velocity *= 0.8;
             let key = |k| f32::from(self.keys.contains(&k));
             let mut acc = Vector3::new(
                 key(KeyCode::KeyD) - key(KeyCode::KeyA),
-                0.0,
+                key(KeyCode::Space) - key(KeyCode::ControlLeft),
                 key(KeyCode::KeyS) - key(KeyCode::KeyW),
             );
-            if self.flying || self.cross_wall {
-                acc.y = key(KeyCode::Space) - key(KeyCode::ControlLeft);
-            }
             if self.keys.contains(&KeyCode::Tab) {
                 acc *= 256.0;
             }
@@ -300,15 +283,6 @@ impl ApplicationHandler for App {
                                     s.renderer.save_png(&name)?;
                                     tracing::info!(path = name, "saved screenshot");
                                 }
-                                KeyCode::F1 => s.flying = !s.flying,
-                                KeyCode::F2 => {
-                                    s.window.set_fullscreen(if s.window.fullscreen().is_some() {
-                                        None
-                                    } else {
-                                        Some(Fullscreen::Borderless(None))
-                                    })
-                                }
-                                KeyCode::F4 => s.cross_wall = !s.cross_wall,
                                 _ => {}
                             }
                         }

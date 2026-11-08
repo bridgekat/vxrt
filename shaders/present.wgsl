@@ -1,6 +1,7 @@
 struct Params  {
     projection: mat4x4<f32>, model_view: mat4x4<f32>, camera:vec4<f32>,
     frame:vec4<u32>, beam:vec4<u32>, world:vec4<u32>, misc:vec4<f32>, sampling:vec4<u32>,
+    traversal:vec4<u32>,
 }
 @group(0) @binding(0) var<uniform> p:Params;
 @group(0) @binding(1) var<storage,read> pixels:array<vec4<f32>>;

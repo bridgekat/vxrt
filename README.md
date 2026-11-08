@@ -25,18 +25,16 @@ Path tracing uses cosine-weighted Lambertian bounces, sun next-event estimation 
 | Control | Action |
 | --- | --- |
 | WASD / mouse | Move / look |
-| Space / left Ctrl | Ascend / descend while flying |
+| Space / left Ctrl | Ascend / descend |
 | Tab | 256× movement acceleration |
 | P | Toggle accumulating path tracing |
 | L | Toggle mouse capture |
 | M (hold) | Show per-pixel traversal cost in interactive mode |
 | C / G | Check / compact the GPU octree using synchronous readback |
 | O | Save a gamma-encoded PNG in `screenshots/` |
-| F1 | Toggle flying and gravity modes |
-| F4 | Toggle forced free flight |
-| F2 / Escape | Toggle borderless fullscreen / quit |
+| Escape | Quit |
 
-Flying is enabled by default. Collision detection is not implemented, so gravity mode falls through terrain.
+Movement is always free flight. There is no gravity or collision detection.
 
 ## Configuration
 
@@ -55,6 +53,7 @@ cargo run --locked -- --print-config > config.toml
 | `noise_levels` | `8` | Dynamic noise texture side length is `2^noise_levels`; allowed range 1–12 |
 | `partial_levels` | `4` | Dynamic terrain noise offset/detail parameter; allowed range 0–8 |
 | `lod_quality` | `0.5` | Positive detail-quality factor; larger values retain finer detail |
+| `march_budget` | `256` | Maximum traversal iterations per ray; allowed range 1–65536 |
 | `field_of_view` | `70.0` | Vertical field of view in degrees; at least 1 and less than 179 |
 | `render_width` | `0` | Render width in pixels; zero follows the window |
 | `render_height` | `0` | Render height in pixels; zero follows the window |
@@ -77,6 +76,8 @@ lod_quality = 0.5
 ```
 
 When the dynamic node budget is exhausted, unresolved nodes appear as coarse opaque placeholders. Increase `max_nodes` or reduce detail to avoid them. Compute workgroups are fixed at 8×8.
+
+Set `march_budget = 1024` in `config.toml` to allow longer rays before traversal gives up, then restart the application. It applies to interactive, beam, path, and shadow rays; the profiler normalizes cost against this budget. Larger values can reduce dark truncation artifacts but increase GPU work and frame time. They do not change the path bounce count or remove the 20-entry traversal-stack limit.
 
 ## Validation
 

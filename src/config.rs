@@ -19,17 +19,17 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            world_levels: 8,
+            world_levels: 10,
             max_height: 256,
-            lod_quality: 0.5,
-            field_of_view: 70.0,
+            lod_quality: 1.0,
+            field_of_view: 90.0,
             render_width: 0,
             render_height: 0,
             seed: 1,
             coherent_sampling: true,
             sky_intensity: 1.0,
-            sun_intensity: 1.0,
-            march_budget: 256,
+            sun_intensity: 256.0,
+            march_budget: 1024,
         }
     }
 }

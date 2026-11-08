@@ -41,7 +41,7 @@ The camera uses inverse perspective and rotation matrices to construct rays. Mov
 
 Interactive frames execute two compute passes with 8×8 workgroups. The first casts a coarse grid of beams at four-pixel spacing. The second uses neighboring beam distances to skip empty space before tracing full-resolution rays. The beam grid includes an extra row and column beyond its rounded-up viewport coverage. Separate parameter buffers and compute passes provide distinct dispatch parameters and ordered storage access.
 
-Traversal uses a 20-entry stack and a configurable `march_budget` (default 256, allowed range 1–65536) per ray. The setting applies to beam, interactive, path-continuation, and shadow rays. Box intersections and test-point offsets determine movement between tree nodes. Interactive shading applies a directional diffuse factor to neutral surfaces with albedo 0.8 using geometric voxel-face normals, with sky color for misses and traversal-cost fading. Surfaces have no grid overlay. The profiler view displays per-pixel traversal iteration cost. Each interactive frame overwrites the color buffer.
+Traversal uses a 20-entry stack and a configurable `march_budget` (default 1024, allowed range 1–65536) per ray. The setting applies to beam, interactive, path-continuation, and shadow rays. Box intersections and test-point offsets determine movement between tree nodes. Interactive shading applies a directional diffuse factor to neutral surfaces with albedo 0.8 using geometric voxel-face normals, with sky color for misses and traversal-cost fading. Surfaces have no grid overlay. The profiler view displays per-pixel traversal iteration cost. Each interactive frame overwrites the color buffer.
 
 ## Path tracing
 
@@ -64,11 +64,11 @@ The estimator follows the standard combination of light sampling, cosine-weighte
 
 The environment uses an approximate sea-level, single-scattering atmosphere: wavelength-dependent Rayleigh scattering and forward-peaked Henyey-Greenstein Mie scattering. Exponential density scale heights determine the optical depth, with a bounded air-mass approximation and Beer-Lambert attenuation producing a blue zenith, pale horizon, and solar haze. The model uses a fixed exposure in linear radiance, extends horizon density below the horizon, and omits altitude changes, ground occlusion, and multiple scattering. Both interactive rendering and path tracing use this same environment.
 
-`sky_intensity` and `sun_intensity` are independent nonnegative linear-radiance multipliers, both defaulting to 1.0. Sky intensity affects the environment outside the solar disk. Sun intensity affects the disk seen by both camera/scattering rays and explicit light samples. Changing intensity does not change the cone PDF or MIS weights.
+`sky_intensity` and `sun_intensity` are independent nonnegative linear-radiance multipliers, defaulting to 1.0 and 256.0 respectively. Sky intensity affects the environment outside the solar disk. Sun intensity affects the disk seen by both camera/scattering rays and explicit light samples. Changing intensity does not change the cone PDF or MIS weights.
 
-The sun disk's half-angle is 0.05 radians, so its solid angle is approximately 0.00785 steradians. Its radiance is only modestly higher than the sky radiance; consequently, its integrated illumination is weak. For an unoccluded horizontal Lambertian plane with normal `n` and sun axis `s`, the reflected solar radiance is `0.8 * sun_radiance * dot(n,s) * sin(0.05)^2` when the whole disk is above the horizon.
+The sun disk's half-angle is 0.05 radians, so its solid angle is approximately 0.00785 steradians. The default sun radiance is 256.0, providing visible direct illumination despite the small solid angle. For an unoccluded horizontal Lambertian plane with normal `n` and sun axis `s`, the reflected solar radiance is `0.8 * sun_radiance * dot(n,s) * sin(0.05)^2` when the whole disk is above the horizon.
 
-To view sunlight against a black sky, use `sky_intensity = 0.0` and optionally raise `sun_intensity` to `100.0`.
+To view sunlight against a black sky, use `sky_intensity = 0.0` and keep `sun_intensity` at its default of `256.0`.
 
 ## Sample sequences and spatial coherence
 

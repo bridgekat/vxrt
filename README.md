@@ -46,21 +46,21 @@ cargo run --locked -- --print-config > config.toml
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `world_levels` | `8` | World side length is `2^world_levels` voxels; allowed range 1–10 |
+| `world_levels` | `10` | World side length is `2^world_levels` voxels; allowed range 1–10 |
 | `max_height` | `256` | Exclusive voxel-height cutoff; voxels at or above it are empty |
-| `lod_quality` | `0.5` | Positive detail-quality factor; larger values retain finer detail |
-| `march_budget` | `256` | Maximum traversal iterations per ray; allowed range 1–65536 |
-| `field_of_view` | `70.0` | Vertical field of view in degrees; at least 1 and less than 179 |
+| `lod_quality` | `1.0` | Positive detail-quality factor; larger values retain finer detail |
+| `march_budget` | `1024` | Maximum traversal iterations per ray; allowed range 1–65536 |
+| `field_of_view` | `90.0` | Vertical field of view in degrees; at least 1 and less than 179 |
 | `render_width` | `0` | Render width in pixels; zero follows the window |
 | `render_height` | `0` | Render height in pixels; zero follows the window |
 | `seed` | `1` | Seed for path samples; terrain geometry uses a fixed height function |
 | `coherent_sampling` | `true` | Share bounce samples across pixels; `false` decorrelates them. Camera jitter is always per-pixel |
 | `sky_intensity` | `1.0` | Nonnegative linear multiplier for sky radiance outside the sun disk; zero makes it black |
-| `sun_intensity` | `1.0` | Nonnegative linear multiplier for the sun disk radiance |
+| `sun_intensity` | `256.0` | Nonnegative linear multiplier for the sun disk radiance |
 
 Terrain generation grows cubically with world size. The GPU tree occupies four bytes per generated node plus a four-byte header. GPU buffer limits constrain terrain size and render resolution. Compute workgroups are fixed at 8×8.
 
-Set `march_budget = 1024` in `config.toml` to allow longer rays before traversal gives up, then restart the application. It applies to interactive, beam, path, and shadow rays; the profiler normalizes cost against this budget. Larger values can reduce dark truncation artifacts but increase GPU work and frame time. They do not change the path bounce count or remove the 20-entry traversal-stack limit.
+The default `march_budget` is `1024`. To adjust it, set `march_budget` in `config.toml`, then restart the application. It applies to interactive, beam, path, and shadow rays; the profiler normalizes cost against this budget. Larger values can reduce dark truncation artifacts but increase GPU work and frame time. They do not change the path bounce count or remove the 20-entry traversal-stack limit.
 
 ## Validation
 
@@ -73,6 +73,6 @@ cargo test --release --locked --test smoke -- --ignored --nocapture
 
 Integration tests check terrain occupancy and height cutoffs, malformed octree rejection, compaction, configuration validation, and WGSL shader validity. GPU smoke tests are ignored by default, require a graphics adapter, and run without a window. They execute compute and presentation passes, check sampler distributions and analytic lighting integrals, test closed/open-room visibility, exercise both spatial sampling modes, and verify deterministic replay, accumulation, read-only geometry, compaction, and reset behavior. Preview PNGs are written to `target/smoke/`.
 
-To isolate sun illumination, set `sky_intensity = 0.0` in `config.toml` and enter path-tracing mode. The small sun disk contributes relatively little integrated energy at the default radiance. Increase `sun_intensity`, for example to `100.0`, to make sunlight more apparent without changing its angular size or sampling PDFs. Both intensity defaults are `1.0`.
+To isolate sun illumination, set `sky_intensity = 0.0` in `config.toml` and enter path-tracing mode. The defaults are `sky_intensity = 1.0` and `sun_intensity = 256.0`, making sunlight apparent despite the sun disk's small angular size. Adjusting these intensities does not change the sun's angular size or sampling PDFs.
 
 See [rendering architecture and development priorities](docs/rendering.md) for algorithm details, limitations, and sampling recommendations.

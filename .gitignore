@@ -1,12 +1,5 @@
-# Ignore files for convenience. Use `git add -f <files>` to force include necessary files.
-
+/target/
+/config.toml
+/screenshots/
 .cache/
 .vscode/
-*.ini
-
-# CMake
-build/
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile

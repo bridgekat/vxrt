@@ -1,4 +1,5 @@
 //! Asynchronous refinement feedback and batched GPU pool updates.
+use super::requests::Requests;
 use crate::{
     config::Config,
     core::{
@@ -16,6 +17,8 @@ pub struct StreamingStats {
     pub frame: u64,
     pub feedback_frame: Option<u64>,
     pub requested: usize,
+    pub request_entries: usize,
+    pub request_dropped: usize,
     pub split: usize,
     pub uploaded_branches: usize,
     pub uploaded_leaves: usize,
@@ -39,7 +42,7 @@ pub(super) struct Streaming {
     pub tree: Tree,
     pub branches: wgpu::Buffer,
     pub leaves: wgpu::Buffer,
-    pub requests: wgpu::Buffer,
+    pub requests: Requests,
     scatter: wgpu::ComputePipeline,
     feedback: Option<Feedback>,
     readback_spare: Option<wgpu::Buffer>,
@@ -85,7 +88,7 @@ impl Streaming {
             tree,
             branches: storage(device, "branches", 16 * 32),
             leaves: storage(device, "leaves", 16 * 16),
-            requests: storage(device, "split requests", 4),
+            requests: Requests::new(device, config.max_split_requests),
             scatter,
             feedback: None,
             readback_spare: None,
@@ -116,25 +119,18 @@ impl Streaming {
             self.stats.feedback_frame = Some(feedback.frame);
             {
                 let bytes = feedback.buffer.slice(..).get_mapped_range();
-                let mut requests: Vec<_> = bytes
-                    .as_chunks::<4>()
-                    .0
+                let words = bytes.as_chunks::<4>().0;
+                let total = u32::from_ne_bytes(words[0]) as usize;
+                self.stats.request_entries = total.min(words.len() - 1);
+                self.stats.request_dropped = total - self.stats.request_entries;
+                let mut indices: Vec<_> = words[1..1 + self.stats.request_entries]
                     .iter()
-                    .enumerate()
-                    .flat_map(|(i, b)| {
-                        let mut bits = u32::from_ne_bytes(*b);
-                        std::iter::from_fn(move || {
-                            if bits == 0 {
-                                return None;
-                            }
-                            let bit = bits.trailing_zeros();
-                            bits &= bits - 1;
-                            Some(Handle {
-                                index: i as u32 * 32 + bit,
-                            })
-                        })
-                    })
+                    .map(|word| u32::from_ne_bytes(*word) - 1)
                     .collect();
+                indices.sort_unstable();
+                indices.dedup();
+                let mut requests: Vec<_> =
+                    indices.into_iter().map(|index| Handle { index }).collect();
                 self.stats.requested = requests.len();
                 if paused {
                     self.stats.paused_discarded = requests.len();
@@ -229,11 +225,6 @@ impl Streaming {
             let groups = words[0].div_ceil(64);
             pass.dispatch_workgroups(groups.min(1024), groups.div_ceil(1024), 1);
         }
-        let size = capacities[1].div_ceil(32) as u64 * 4;
-        if self.requests.size() != size {
-            self.requests = storage(device, "grown split requests", size);
-            resized = true;
-        }
         resized
     }
     pub fn capture(
@@ -247,19 +238,20 @@ impl Streaming {
         if self.feedback.is_some() {
             return None;
         }
+        let packet = self.requests.merge(device, encoder);
         let buffer = self
             .readback_spare
             .take()
-            .filter(|buffer| buffer.size() == self.requests.size())
+            .filter(|buffer| buffer.size() == packet.size())
             .unwrap_or_else(|| {
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("split feedback readback"),
-                    size: self.requests.size(),
+                    size: packet.size(),
                     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                     mapped_at_creation: false,
                 })
             });
-        encoder.copy_buffer_to_buffer(&self.requests, 0, &buffer, 0, buffer.size());
+        encoder.copy_buffer_to_buffer(packet, 0, &buffer, 0, buffer.size());
         self.tree.begin_feedback();
         let (tx, rx) = mpsc::channel();
         self.feedback = Some(Feedback {

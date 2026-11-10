@@ -107,6 +107,10 @@ impl StatsOverlay {
                                 activity.split, activity.budget_deferred
                             ));
                             ui.small(format!(
+                                "Packet {} entries | {} dropped",
+                                activity.request_entries, activity.request_dropped
+                            ));
+                            ui.small(format!(
                                 "Pool full {} | stale {}",
                                 activity.pool_limited, activity.stale
                             ));

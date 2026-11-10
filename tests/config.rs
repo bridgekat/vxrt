@@ -3,6 +3,14 @@ use vxrt::config::*;
 fn rejects_invalid_shader_parameters() {
     for config in [
         Config {
+            max_split_requests: 0,
+            ..Default::default()
+        },
+        Config {
+            max_split_requests: 1048577,
+            ..Default::default()
+        },
+        Config {
             splits_per_frame: 0,
             ..Default::default()
         },

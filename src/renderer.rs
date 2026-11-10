@@ -1,4 +1,5 @@
 mod readback;
+mod requests;
 mod streaming;
 
 use crate::{config::Config, core::tree::Tree};
@@ -68,7 +69,7 @@ impl Renderer {
             })
             .await?;
         tracing::info!(adapter=?adapter.get_info(),"GPU selected");
-        let streaming = Streaming::new(&device, &config);
+        let mut streaming = Streaming::new(&device, &config);
         let uniforms = std::array::from_fn(|_| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("frame parameters"),
@@ -119,6 +120,7 @@ impl Renderer {
         });
         let (width, height) = Self::dimensions(&config, width, height);
         let (frame, beams) = Self::buffers(&device, width, height)?;
+        streaming.requests.resize(&device, width, height)?;
         let groups = Self::groups(&device, &pipeline, &uniforms, &streaming, &frame, &beams);
         let present_group = Self::present_group(&device, &present, &uniforms[1], &frame);
         Ok(Self {
@@ -222,7 +224,7 @@ impl Renderer {
                         },
                         wgpu::BindGroupEntry {
                             binding: 5,
-                            resource: streaming.requests.as_entire_binding(),
+                            resource: streaming.requests.pixels.as_entire_binding(),
                         },
                     ],
                 })
@@ -256,6 +258,7 @@ impl Renderer {
             return Ok(());
         }
         let (frame, beams) = Self::buffers(&self.device, w, h)?;
+        self.streaming.requests.resize(&self.device, w, h)?;
         self.frame = frame;
         self.beams = beams;
         self.width = w;
@@ -294,7 +297,7 @@ impl Renderer {
                 &self.beams,
             );
         }
-        encoder.clear_buffer(&self.streaming.requests, 0, None);
+        let collect_requests = !path && !self.streaming.feedback_pending();
         let camera = ([position.x, position.y, position.z], rotation);
         if path != self.last_path || (path && self.last_camera != Some(camera)) {
             self.samples = 0;
@@ -335,7 +338,7 @@ impl Renderer {
                 self.config.world_levels,
                 self.config.march_budget,
                 self.streaming.tree.root(),
-                0,
+                u32::from(collect_requests),
             ],
             lighting: [
                 self.config.lod_quality,

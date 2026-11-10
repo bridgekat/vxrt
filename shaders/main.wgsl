@@ -9,7 +9,7 @@ struct Params {
     beam: vec4<u32>,
     // previous index/size, current index/size
     scene: vec4<u32>,
-    // world levels, march budget, root descriptor, reserved
+    // world levels, march budget, root descriptor, collect requests
     lighting: vec4<f32>,
     // LOD quality, sky intensity, sun intensity, reserved
     sampling: vec4<u32>,
@@ -29,7 +29,8 @@ var<storage, read_write> frame: array<vec4<f32>>;
 var<storage, read_write> beams: array<f32>;
 
 @group(0) @binding(5)
-var<storage, read_write> requests: array<atomic<u32>>;
+var<storage, read_write> requests: array<u32>;
+var<private> request_slot: u32;
 
 const ALBEDO = 0.8;
 
@@ -181,9 +182,10 @@ fn cast_ray(reference: vec3<f32>, direction: vec3<f32>) -> f32 {
         }
         // Occupancy and deferred flags are cached in each descriptor. Material
         // payloads remain in the leaf pool; traversal does not need to fetch them.
-        if (data & 8u) != 0u && p.frame.z == 0u && lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
-            let index = data >> 4u;
-            atomicOr(&requests[index >> 5u], 1u << (index & 31u));
+        if (data & 8u) != 0u && p.scene.w != 0u && lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
+            // A deferred leaf is solid, so this ray returns immediately below.
+            // Encode index + 1; zero means no request from this invocation.
+            requests[request_slot] = (data >> 4u) + 1u;
         }
         if (data & 4u) != 0u {
             return f32(i) / f32(p.scene.y);
@@ -296,6 +298,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     if any(pixel >= extent) {
         return;
     }
+    request_slot = pixel.y * extent.x + pixel.x;
+    if beam_mode { request_slot += p.frame.x * p.frame.y; }
+    if p.scene.w != 0u { requests[request_slot] = 0u; }
     var beam_result = 0.0;
     if p.beam.x < 1u && p.frame.z == 0u {
         let base = pixel / (p.beam.y / p.beam.w);

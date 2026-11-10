@@ -6,3 +6,4 @@ pub const TRACE: &str = concat!(
 );
 pub const PRESENT: &str = include_str!("../shaders/present.wgsl");
 pub const SCATTER: &str = include_str!("../shaders/scatter.wgsl");
+pub const REQUESTS: &str = include_str!("../shaders/requests.wgsl");

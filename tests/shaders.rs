@@ -4,6 +4,7 @@ fn validate_shaders() {
         vxrt::shaders::TRACE,
         vxrt::shaders::PRESENT,
         vxrt::shaders::SCATTER,
+        vxrt::shaders::REQUESTS,
     ] {
         let module = naga::front::wgsl::parse_str(source)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));

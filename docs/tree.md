@@ -14,7 +14,9 @@ Interactive rendering permits refinement. Accumulating path tracing freezes the 
 | `src/core/tree.rs` | Root, parent links, topology changes, dirty slots, statistics, validation |
 | `src/core/packed.rs` | Packed scene validation and independent exact reference generation |
 | `src/renderer/streaming.rs` | Feedback readback, refinement scheduling, GPU buffers, scatter uploads |
-| `shaders/main.wgsl` | Read-only traversal and atomic refinement requests |
+| `src/renderer/requests.rs` | Per-ray buffers and hierarchical bounded request merging |
+| `shaders/main.wgsl` | Read-only traversal and per-ray refinement requests |
+| `shaders/requests.wgsl` | 64-way request-list merging without deduplication |
 | `shaders/scatter.wgsl` | Applying complete slot patches |
 
 `core` has no windowing or GPU dependencies. One CPU owner currently performs tree operations on the render thread. The separation permits future worker scheduling, but there are no concurrent pool mutations or allocator locks today.
@@ -41,7 +43,8 @@ Branches and leaves use separate pools so growing leaf material data does not in
 | --- | --- | --- |
 | Branch | 32 bytes | Eight 32-bit child descriptors |
 | Leaf | 16 bytes | Occupancy, deferred-detail flag, two reserved words |
-| Requests | 4 bytes per 32 leaf slots, rounded up | Atomic refinement bitset |
+| Ray request | 4 bytes per pixel or coarse beam | Zero or leaf index plus one |
+| Merged list | One count word plus bounded entries | Total raw count and retained request indices |
 
 Descriptors store the pool index in bits 4–31 and a tag in bits 0–1: branch `1`, leaf `3`. Leaf descriptors also cache occupancy in bit 2 and deferred status in bit 3. Traversal can test these without a dependent leaf-buffer read; the separate leaf pool retains material records for future shading. Any operation changing these flags must also patch the parent descriptor, or the root uniform. Current operations replace leaves rather than edit their material in place.
 
@@ -72,7 +75,7 @@ Two independent kinds of CPU bookkeeping are required:
 | Dirty slot sets | Final live records not yet included in an upload batch | Drained by upload synchronization |
 | Feedback invalidation sets | Slot identities changed since the GPU snapshot producing the outstanding readback | Cleared only after that batch is consumed or discarded |
 
-At most one readback batch is outstanding. After uploads and traversal have been recorded, capturing its request flags starts an empty invalidation set in each pool. The tracked snapshot is the state those ordered GPU commands will observe; it need not have finished executing when capture is recorded.
+At most one readback batch is outstanding. After uploads, traversal, and request merging have been recorded, capturing its packet starts an empty invalidation set in each pool. The tracked snapshot is the state those ordered GPU commands will observe; it need not have finished executing when capture is recorded.
 
 While that batch is outstanding, freeing or allocating a slot inserts its index into the corresponding invalidation set. Pool growth preserves existing identities. A returned leaf index is accepted only if it is still allocated and absent from the invalidation set. Its current refinement eligibility is then checked again. In-place content edits do not by themselves change identity.
 
@@ -88,19 +91,33 @@ The renderer uses this order:
 
 1. Poll for a completed feedback batch without blocking. If interactive, process requests up to `splits_per_frame` successful splits and compact when needed.
 2. Record GPU pool growth copies, then scatter patches for dirty branch and leaf slots. Rebuild bindings when buffers change.
-3. Clear request flags and provide the current root and frame parameters.
-4. Run traversal: interactive beam pass followed by full-resolution rays, or the path-tracing pass.
-5. If interactive and no readback is outstanding, copy request flags into a readback buffer. Submit commands and request asynchronous mapping.
+3. Provide the current root and frame parameters. Enable request collection only if interactive and no readback is outstanding.
+4. Run traversal: interactive beam pass followed by full-resolution rays, or the path-tracing pass. Collecting invocations initialize and write their own request slots.
+5. If collecting, merge per-ray lists into one bounded packet, then copy that packet into the reusable readback buffer. Submit commands and request asynchronous mapping.
 
-Copies and separate compute passes are ordered through wgpu command submission. Traversal therefore sees complete topology updates, and readback copies the flags produced after that frame's clear. CPU code reads a feedback buffer only after its mapping callback succeeds. No shader workgroup barrier is used as a substitute for ordering between dispatches.
+Copies and separate compute passes are ordered through wgpu command submission. Traversal sees complete topology updates, each merge level reads the previous level's finished output, and readback copies the final packet. CPU code reads a feedback buffer only after its mapping callback succeeds. No shader workgroup barrier is used as a substitute for ordering between dispatches.
+
+The normal path uses `map_async`, nonblocking `PollType::Poll`, and `try_recv`; rendering continues when feedback is not ready. The copy still has GPU dependencies and consumes bandwidth, so asynchronous mapping does not imply free or fully overlapped transfers. C diagnostics and PNG export deliberately use synchronous readback.
 
 Each nonempty pool update is one contiguous buffer containing a record count, record stride, and `(slot_index, complete_slot_data)` records. One compute invocation writes one destination slot. Unique indices eliminate overlapping writes and destination atomics. Pool growth copies the old GPU buffer before applying patches; unchanged records are not re-uploaded from the CPU.
 
 Scatter uploads reduce many small upload calls at the cost of an extra dispatch and an index per record. Their performance advantage is workload-dependent and has not been established by a benchmark. Dense updates may favor contiguous range writes. Staging buffers are allocated per nonempty upload batch. The feedback readback buffer is reused after unmapping, and replaced when request capacity changes.
 
+## Sparse request collection
+
+The [ray-casting protocol](raycast.md#refinement-output-contract) produces at most one request per primary pixel and coarse beam. Each ray owns its output slot, so collection needs neither global atomics nor warp coordination. Duplicates remain on the GPU. Slot count is `width * height + (ceil(width/4) + 1) * (ceil(height/4) + 1)`, independent of tree size.
+
+The `max_split_requests` setting bounds the final packet's entries (default 16,384; range 1–1,048,576). It counts raw entries, including duplicates, and is independent of the successful-split budget. A 64-way merge combines lists in each compute workgroup, using a shared-memory prefix scan to place nonempty entries. Further dispatches merge the resulting lists until one remains. Each record contains a total raw count followed by at most its capacity of retained entries. Intermediate capacity grows by 64 per level until reaching the configured bound. Counts include dropped entries, so overflow remains observable even when it occurs at intermediate levels.
+
+The first level rotates the ray-slot order by the configured packet capacity between captures. Truncation retains a prefix of that rotated nonempty stream. This avoids permanently favoring one screen region; it is not a priority system or a guarantee of short loading latency. Duplicates can occupy most of a small packet. Unretained requests are rediscovered by later rays, with no persistent suppression bit preventing retries.
+
+One fixed-size bounded packet is read back per captured batch, including when the count is zero. Its size is at most `4 * (max_split_requests + 1)` bytes (65,540 bytes at the default); very small viewports use a smaller final capacity. There is no count-first round trip or indirect copy. Only initialized entries within the count/capacity bound are decoded; unused tail words are ignored. CPU code sorts and deduplicates retained indices before checking snapshot validity and applying splits.
+
+Collection and GPU temporary memory scale with ray count, and retained readback/CPU decoding scale with packet capacity rather than tree capacity. Merge work is still present in steady state, and the packet does not shrink to its actual count. For very large viewports, profile this bandwidth and dispatch cost; GPU deduplication could improve loading efficiency but is not needed for correctness. All request resources are rebuilt on resolution changes, while an already captured staging buffer and its invalidation logs remain valid until consumed.
+
 ## Refinement demand and residency
 
-Interactive rays atomically mark deferred leaves when the screen-space LOD test requires finer geometry. Leaf index `i` sets bit `i & 31` in request word `i >> 5` using atomic OR. Multiple rays requesting the same leaf produce one flag; different leaves sharing a word retain independent flags. CPU decoding visits set bits and reports unique leaf counts, not nonzero-word counts. The bitset reduces clearing, copying, and scanning by up to 32× compared with one word per leaf. There is no CPU distance cutoff: distance alone must not reject detail that the renderer still asks for.
+Refinement follows the screen-space LOD test without a CPU distance cutoff: distance alone must not reject detail that the renderer still asks for.
 
 The `splits_per_frame` setting in `config.toml` limits successful CPU splits per frame receiving feedback (default 1,024; range 1–4,096). Larger budgets load detail in fewer frames but can increase CPU frame time. This is a split budget, not an upload-record limit: a split creates one branch and eight leaves and may patch its parent.
 
@@ -113,16 +130,19 @@ No resident node is evicted because it is distant or unused. Memory use can ther
 The overlay separates resident state, sampled every 250 ms, from activity measured every render frame:
 
 - Resident state includes branch/leaf counts and capacities, free slots, exact empty/solid leaves, deferred leaves, live/reserved GPU pool bytes, and baked height-bound bytes.
-- GPU-to-CPU activity counts unique flagged leaf slots in the batch received this frame. Its source frame is reported separately; no received batch is distinct from a received empty batch.
+- GPU-to-CPU activity counts unique leaf indices after CPU deduplication of the received packet. Its source frame is reported separately; no received batch is distinct from a received empty batch.
+- Packet counters report retained raw entries (`request_entries`) and raw entries dropped by the bound (`request_dropped`). Duplicates count in these values; neither is a count of unique omitted nodes.
 - CPU-to-GPU activity counts unique live branch and leaf records patched this frame. It excludes uniforms, unchanged records copied during growth, and unreachable freed slots.
 - Request outcomes include successful splits, budget deferrals, pool-limit failures, stale identities, no-longer-needed refinement, and requests discarded while paused.
 
 An idle view can retain many deferred leaves outside its required LOD. Zero requests is not proof of complete traversal when rays can exhaust their march budget. GPU pool byte counts exclude request/readback buffers, staging, framebuffers, and CPU metadata.
 
-`Tree::validate` checks reachable allocations, unique references, parent links, regions, and valid leaf data. The C control also compares every allocated GPU slot against its CPU record. Integration tests cover terrain bounds, local compatibility, allocation reuse, delayed-feedback invalidation, topology, and imports. GPU smoke tests exercise growth and scatter writes, frozen accumulation, residency retention, per-frame accounting, distant-view refinement, and fixed-view convergence against exact reference terrain.
+`Tree::validate` checks reachable allocations, unique references, parent links, regions, and valid leaf data. The C control also compares every allocated GPU slot against its CPU record. Integration tests cover terrain bounds, local compatibility, allocation reuse, delayed-feedback invalidation, topology, and imports. GPU smoke tests exercise growth and scatter writes, frozen accumulation, residency retention, per-frame accounting, distant-view refinement, and fixed-view convergence against exact reference terrain. Request tests compare hierarchical output against a CPU stream filter, including empty input, duplicates, rotation, truncation, partial groups, and 2D dispatch. A small-packet rendering test exercises overflow and CPU deduplication.
 
 ## Packed scenes and scope
 
 `core::packed` provides an independent input/reference encoding: a node-count header followed by tagged words, with branches pointing to eight contiguous packed children and leaves storing occupancy 0 or 1. Import validates the reachable structure and constructs runtime pool records; it does not preserve unreachable storage. `Renderer::replace_packed_scene` replaces the procedural scene, disables its terrain streaming, and resets accumulation. All runtime merging remains in `Tree`.
 
-The current design supports a height-field terrain source and exact binary occupancy. It does not implement terrain editing, worker-thread generation, eviction, richer material compatibility, or background refinement during accumulation. Path tracing converges to the frozen resident and LOD approximation, not necessarily the fully refined terrain. See [rendering architecture](rendering.md) for traversal, lighting, sampling, and accumulation details.
+The current design supports a height-field terrain source and exact binary occupancy. It does not implement terrain editing, worker-thread generation, eviction, richer material compatibility, or background refinement during accumulation. Path tracing converges to the frozen resident and LOD approximation, not necessarily the fully refined terrain. See [ray casting](raycast.md) for traversal and profiling, and [sampling](sampling.md) for lighting and accumulation.
+
+Useful optimization experiments include ancestor-only merging after splits, worker generation if CPU profiling supports it, coalesced range uploads versus scatter writes at different dirty densities, and upload-staging reuse. Measure active loading separately from steady state. Pool locality after allocation/reuse may affect traversal, but relocation would require reference updates and preservation of the feedback snapshot invariant.

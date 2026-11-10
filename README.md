@@ -53,6 +53,7 @@ cargo run --locked -- --print-config > config.toml
 | --- | --- | --- |
 | `world_levels` | `10` | World side length is `2^world_levels` voxels; allowed range 1–10 |
 | `splits_per_frame` | `1024` | Maximum successful CPU splits per frame receiving feedback; allowed range 1–4096. Each split updates several node records |
+| `max_split_requests` | `16384` | Maximum raw request entries per readback packet, including duplicates; allowed range 1–1048576. CPU deduplicates before splitting |
 | `max_height` | `256` | Exclusive voxel-height cutoff; voxels at or above it are empty |
 | `lod_quality` | `1.0` | Positive detail-quality factor; larger values retain finer detail |
 | `march_budget` | `1024` | Maximum traversal iterations per ray; allowed range 1–65536 |
@@ -83,6 +84,4 @@ To isolate sun illumination, set `sky_intensity = 0.0` in `config.toml` and ente
 
 CPU terrain and tree algorithms live in `src/core/`; GPU streaming and rendering live in `src/renderer.rs` and `src/renderer/`. The packed scene format is an import/reference representation, separate from the runtime pools.
 
-See [sparse voxel tree design](docs/tree.md) for CPU/GPU ownership, allocation, refinement, and synchronization. See [rendering architecture and development priorities](docs/rendering.md) for traversal, lighting, sampling, and limitations.
-
-See [performance measurement](docs/performance.md) for the opt-in steady-state benchmark, measured results, and profiling priorities.
+See [tree design](docs/tree.md) for allocation and bounded request feedback, [ray-casting protocol](docs/raycast.md) for traversal and performance measurement, and [sampling](docs/sampling.md) for light transport and accumulation.

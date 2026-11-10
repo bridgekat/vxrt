@@ -16,6 +16,7 @@ pub struct Config {
     pub sun_intensity: f32,
     pub march_budget: u32,
     pub splits_per_frame: u32,
+    pub max_split_requests: u32,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -32,6 +33,7 @@ impl Default for Config {
             sun_intensity: 256.0,
             march_budget: 1024,
             splits_per_frame: 1024,
+            max_split_requests: 16384,
         }
     }
 }
@@ -47,6 +49,10 @@ impl Config {
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            (1..=1048576).contains(&self.max_split_requests),
+            "max_split_requests must be 1..=1048576"
+        );
         ensure!(
             (1..=4096).contains(&self.splits_per_frame),
             "splits_per_frame must be 1..=4096"

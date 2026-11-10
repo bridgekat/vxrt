@@ -28,6 +28,7 @@ async fn run() -> Result<()> {
             Renderer::new(&adapter, config, 65, 37, wgpu::TextureFormat::Rgba8Unorm).await?;
         r.replace_packed_scene(&vxrt::core::packed::generate_terrain(8, 256))?;
         if coherent_sampling {
+            support::requests::check(&r)?;
             support::sampling::check(&r).await?;
         }
         let target = r.device.create_texture(&wgpu::TextureDescriptor {
@@ -391,18 +392,20 @@ fn check_overlay(r: &mut Renderer) -> Result<()> {
 }
 
 async fn check_settling(adapter: &wgpu::Adapter) -> Result<()> {
-    for (levels, camera) in [
-        (8, Vector3::new(128., 258., 240.)),
-        (10, Vector3::new(512., 300., 900.)),
+    for (levels, camera, max_split_requests) in [
+        (8, Vector3::new(128., 258., 240.), 16384),
+        (10, Vector3::new(512., 300., 900.), 16384),
+        (8, Vector3::new(128., 258., 240.), 32),
     ] {
         let config = Config {
             world_levels: levels,
+            max_split_requests,
             ..Default::default()
         };
         let mut r =
             Renderer::new(adapter, config, 129, 73, wgpu::TextureFormat::Rgba8Unorm).await?;
         let mut quiet = 0;
-        for frame in 0..512 {
+        for frame in 0..1024 {
             r.render(camera, [-35., 0.], false, false, frame, None)?;
             r.read_frame()?;
             let stats = r.streaming_stats();
@@ -479,11 +482,14 @@ async fn check_activity_counters(adapter: &wgpu::Adapter) -> Result<()> {
     let config = Config {
         world_levels: 8,
         splits_per_frame: 1,
+        max_split_requests: 8,
         ..Default::default()
     };
     let mut r = Renderer::new(adapter, config, 33, 19, wgpu::TextureFormat::Rgba8Unorm).await?;
     let camera = Vector3::new(128., 258., 240.);
     let mut saw_budget = false;
+    let mut saw_overflow = false;
+    let mut saw_duplicates = false;
     for i in 0..24 {
         r.render(camera, [-45., 0.], false, false, i, None)?;
         r.read_frame()?;
@@ -515,8 +521,18 @@ async fn check_activity_counters(adapter: &wgpu::Adapter) -> Result<()> {
             ensure!(s.uploaded_nodes() == 1, "initial root upload count");
         }
         saw_budget |= s.budget_deferred > 0;
+        saw_overflow |= s.request_dropped > 0;
+        saw_duplicates |= s.request_entries > s.requested;
+        ensure!(
+            s.request_entries <= 8 && s.requested <= s.request_entries,
+            "invalid bounded packet counts"
+        );
     }
     ensure!(saw_budget, "did not exercise budget-deferred feedback");
+    ensure!(
+        saw_overflow && saw_duplicates,
+        "did not exercise overflow and CPU deduplication"
+    );
     for i in 0..3 {
         r.render(camera, [-45., 0.], true, false, i, None)?;
         r.read_frame()?;

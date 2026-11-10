@@ -1,15 +1,15 @@
 //! Packed scene interchange: a node-count header followed by tagged words.
 //! Branch words point to eight contiguous children; leaves contain binary occupancy.
 //! This format is imported into the runtime pools, never traversed by the GPU directly.
-use super::terrain::height;
+use super::{MAX_WORLD_LEVELS, terrain::height};
 use anyhow::{Result, ensure};
 
 /// Validate the header and reachable nodes; return the number of reachable nodes.
 /// Unreachable storage is allowed and ignored during import.
 pub fn validate(words: &[u32], world_levels: u32) -> Result<usize> {
     ensure!(
-        (1..=10).contains(&world_levels),
-        "world_levels must be 1..=10"
+        (1..=MAX_WORLD_LEVELS).contains(&world_levels),
+        "world_levels must be 1..={MAX_WORLD_LEVELS}"
     );
     ensure!(
         words.len() >= 2 && words[0] as usize == words.len() - 1,
@@ -40,7 +40,7 @@ pub fn validate(words: &[u32], world_levels: u32) -> Result<usize> {
 
 /// Build an exact reference scene independently of streaming and min/max classification.
 pub fn generate_terrain(levels: u32, max_height: u32) -> Vec<u32> {
-    assert!((1..=10).contains(&levels));
+    assert!((1..=MAX_WORLD_LEVELS).contains(&levels));
     let size = 1usize << levels;
     let heights: Vec<i64> = (0..size * size)
         .map(|i| height((i / size) as f64, (i % size) as f64))

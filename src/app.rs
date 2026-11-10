@@ -7,7 +7,6 @@ use std::{
 };
 use vxrt::{
     config::Config,
-    core::tree::TreeStats,
     renderer::Renderer,
     stats_overlay::{OverlayStats, StatsOverlay},
 };
@@ -44,8 +43,6 @@ struct State {
     renderer: Renderer,
     overlay: StatsOverlay,
     egui_input: egui_winit::State,
-    tree_stats: TreeStats,
-    stats_time: Instant,
     fps: f32,
     position: Vector3<f32>,
     velocity: Vector3<f32>,
@@ -113,7 +110,6 @@ impl State {
             None,
             None,
         );
-        let tree_stats = renderer.tree_stats();
         let world = (1u32 << config.world_levels) as f32;
         let mut state = Self {
             window,
@@ -122,8 +118,6 @@ impl State {
             renderer,
             overlay,
             egui_input,
-            tree_stats,
-            stats_time: Instant::now(),
             fps: 0.,
             position: Vector3::new(world * 0.5, world + 2.0, world * 0.5),
             velocity: Vector3::new(0.0, 0.0, 0.0),
@@ -215,12 +209,8 @@ impl State {
             self.renderer.samples,
             Some(&view),
         )?;
-        if self.stats_time.elapsed() >= Duration::from_millis(250) {
-            self.tree_stats = self.renderer.tree_stats();
-            self.stats_time = Instant::now();
-        }
         let stats = OverlayStats {
-            tree: self.tree_stats,
+            tree: self.renderer.tree_stats(),
             streaming: self.renderer.streaming_stats(),
             path_tracing: self.path,
             samples: self.renderer.samples,

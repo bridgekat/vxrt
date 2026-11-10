@@ -1,5 +1,5 @@
 use vxrt::core::{
-    node::{self, Leaf, Region},
+    node::{self, NodeData, Region},
     terrain::HeightMap,
 };
 #[test]
@@ -30,13 +30,23 @@ fn bounds_and_classification_match_every_voxel() {
                     assert_eq!(
                         material,
                         if empty {
-                            Leaf::EMPTY
+                            NodeData::EMPTY
                         } else if solid {
-                            Leaf::SOLID
+                            NodeData::SOLID
                         } else {
-                            Leaf::DEFERRED
+                            NodeData::MIXED
                         }
                     );
+                    if size > 1 {
+                        let children = node::split(
+                            &map,
+                            Region {
+                                origin: [x, y, z],
+                                size,
+                            },
+                        );
+                        assert_eq!(node::merge_summarize(children), material);
+                    }
                 }
             }
         }
@@ -44,10 +54,36 @@ fn bounds_and_classification_match_every_voxel() {
 }
 #[test]
 fn merges_only_compatible_exact_leaves() {
-    assert_eq!(node::merge([Leaf::EMPTY; 8]), Some(Leaf::EMPTY));
-    assert_eq!(node::merge([Leaf::SOLID; 8]), Some(Leaf::SOLID));
-    assert_eq!(node::merge([Leaf::DEFERRED; 8]), None);
-    let mut mixed = [Leaf::SOLID; 8];
-    mixed[3] = Leaf::EMPTY;
-    assert_eq!(node::merge(mixed), None);
+    assert_eq!(
+        node::try_merge_exact([NodeData::EMPTY; 8]),
+        Some(NodeData::EMPTY)
+    );
+    assert_eq!(
+        node::try_merge_exact([NodeData::SOLID; 8]),
+        Some(NodeData::SOLID)
+    );
+    assert_eq!(node::try_merge_exact([NodeData::MIXED; 8]), None);
+    let mut mixed = [NodeData::SOLID; 8];
+    mixed[3] = NodeData::EMPTY;
+    assert_eq!(node::try_merge_exact(mixed), None);
+}
+
+#[test]
+fn summaries_preserve_uncertainty_for_every_child_combination() {
+    let states = [NodeData::EMPTY, NodeData::SOLID, NodeData::MIXED];
+    for mut code in 0..3usize.pow(8) {
+        let children = std::array::from_fn(|_| {
+            let child = states[code % 3];
+            code /= 3;
+            child
+        });
+        let expected = if children.iter().all(|c| *c == NodeData::EMPTY) {
+            NodeData::EMPTY
+        } else if children.iter().all(|c| *c == NodeData::SOLID) {
+            NodeData::SOLID
+        } else {
+            NodeData::MIXED
+        };
+        assert_eq!(node::merge_summarize(children), expected);
+    }
 }

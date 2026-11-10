@@ -62,17 +62,17 @@ impl StatsOverlay {
                                 tree.branches, tree.branch_capacity
                             ));
                             ui.monospace(format!(
-                                "Leaves   {:>8} / {}",
-                                tree.leaves, tree.leaf_capacity
+                                "Data     {:>8} / {}",
+                                tree.data_nodes, tree.data_capacity
                             ));
                             ui.label(format!(
-                                "Free slots: {} branches, {} leaves",
+                                "Free slots: {} branches, {} data",
                                 tree.branch_capacity - tree.branches,
-                                tree.leaf_capacity - tree.leaves
+                                tree.data_capacity - tree.data_nodes
                             ));
                             ui.separator();
                             ui.label(format!(
-                                "Empty {}   Solid {}",
+                                "Leaves: Empty {}   Solid {}",
                                 tree.empty_leaves, tree.solid_leaves
                             ));
                             ui.label(format!("Deferred solid previews: {}", tree.deferred_leaves));

@@ -1,6 +1,7 @@
 mod readback;
 mod requests;
 mod streaming;
+mod uploads;
 
 use crate::{config::Config, core::tree::Tree};
 use anyhow::{Result, ensure};
@@ -212,7 +213,7 @@ impl Renderer {
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: streaming.branches.as_entire_binding(),
+                            resource: streaming.gpu.branches.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
@@ -221,6 +222,10 @@ impl Renderer {
                         wgpu::BindGroupEntry {
                             binding: 3,
                             resource: beams.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: streaming.gpu.data.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 5,
@@ -423,10 +428,14 @@ impl Renderer {
     }
     pub fn check_tree(&self) -> Result<(u32, usize)> {
         let reachable = self.streaming.tree.validate()?;
-        let branches =
-            self.read_buffer(&self.streaming.branches, self.streaming.branches.size())?;
-        let leaves = self.read_buffer(&self.streaming.leaves, self.streaming.leaves.size())?;
-        self.streaming.verify(&branches, &leaves)?;
+        let branches = self.read_buffer(
+            &self.streaming.gpu.branches,
+            self.streaming.gpu.branches.size(),
+        )?;
+        let data = self.read_buffer(&self.streaming.gpu.data, self.streaming.gpu.data.size())?;
+        self.streaming
+            .gpu
+            .verify(&self.streaming.tree, &branches, &data)?;
         Ok((reachable as u32, reachable))
     }
     /// Replace the procedural scene with an exact packed tree (streaming disabled).
@@ -437,3 +446,6 @@ impl Renderer {
         Ok(())
     }
 }
+#[cfg(test)]
+#[path = "../tests/support/renderer_lod.rs"]
+mod lod_tests;

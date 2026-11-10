@@ -1,3 +1,4 @@
+use crate::core::MAX_WORLD_LEVELS;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
@@ -69,8 +70,8 @@ impl Config {
             "sky_intensity and sun_intensity must be finite and nonnegative"
         );
         ensure!(
-            (1..=10).contains(&self.world_levels),
-            "world_levels must be 1..=10"
+            (1..=MAX_WORLD_LEVELS).contains(&self.world_levels),
+            "world_levels must be 1..={MAX_WORLD_LEVELS}"
         );
         ensure!(
             self.lod_quality.is_finite() && self.lod_quality > 0.0,

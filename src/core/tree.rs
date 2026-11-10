@@ -1,46 +1,22 @@
-//! CPU-owned SVO topology, residency, and dirty slot tracking.
+//! CPU-owned topology with consistent summaries and local exact compaction.
 use super::{
-    node::{self, Leaf, Region},
+    node::{self, NodeData, Region},
     pool::{Handle, Pool},
     terrain::HeightMap,
 };
-use anyhow::{Result, ensure};
-use std::collections::{BTreeSet, HashSet};
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Node {
-    Branch(Handle),
-    Leaf(Handle),
-}
-impl Node {
-    fn identity(self) -> u32 {
-        match self {
-            Self::Branch(h) => h.index << 2 | 1,
-            Self::Leaf(h) => h.index << 2 | 3,
-        }
-    }
-}
-#[derive(Clone, Copy)]
-struct Parent {
-    branch: Handle,
-    child: usize,
-}
-struct LeafEntry {
-    material: Leaf,
-    region: Region,
-    parent: Option<Parent>,
-}
-struct Branch {
-    children: [Node; 8],
-    region: Region,
-    parent: Option<Parent>,
-}
-/// CPU-side resident topology and GPU pool storage; excludes staging and CPU metadata.
+use std::collections::BTreeSet;
+
+mod diagnostics;
+mod import;
+mod storage;
+pub use storage::{BRANCH_WORDS, DATA_WORDS, PoolKind};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TreeStats {
     pub branches: usize,
     pub leaves: usize,
+    pub data_nodes: usize,
     pub branch_capacity: usize,
-    pub leaf_capacity: usize,
+    pub data_capacity: usize,
     pub empty_leaves: usize,
     pub solid_leaves: usize,
     pub deferred_leaves: usize,
@@ -48,373 +24,257 @@ pub struct TreeStats {
 }
 impl TreeStats {
     pub fn gpu_pool_bytes(self) -> usize {
-        self.branch_capacity * 32 + self.leaf_capacity * 16
+        (self.branch_capacity * BRANCH_WORDS + self.data_capacity * DATA_WORDS) * 4
     }
     pub fn gpu_live_bytes(self) -> usize {
-        self.branches * 32 + self.leaves * 16
+        (self.branches * BRANCH_WORDS + self.data_nodes * DATA_WORDS) * 4
     }
 }
+
+/// A data-slot allocation; stable across refinement and derefinement, not slot reuse.
+pub type Node = Handle;
+#[derive(Clone, Copy)]
+struct Parent {
+    node: Node,
+    child: usize,
+}
+struct Entry {
+    material: NodeData,
+    region: Region,
+    parent: Option<Parent>,
+    children: Option<Handle>,
+}
+struct Branch {
+    children: [Node; 8],
+    owner: Node,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Refinement {
+pub(crate) enum Refinement {
     Split,
     Stale,
     NotNeeded,
     PoolLimited,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct LeafCounts {
+    empty: usize,
+    solid: usize,
+    deferred: usize,
+}
+impl LeafCounts {
+    fn counter(&mut self, material: NodeData) -> &mut usize {
+        if material.mixed {
+            &mut self.deferred
+        } else if material.occupancy == 0 {
+            &mut self.empty
+        } else {
+            &mut self.solid
+        }
+    }
+}
 pub struct Tree {
     branches: Pool<Branch>,
-    leaves: Pool<LeafEntry>,
+    data: Pool<Entry>,
     root: Node,
     map: Option<HeightMap>,
     dirty_branches: BTreeSet<u32>,
-    dirty_leaves: BTreeSet<u32>,
+    dirty_data: BTreeSet<u32>,
+    leaf_counts: LeafCounts,
+    height_map_bytes: usize,
 }
 impl Tree {
+    fn empty(limit: usize) -> Self {
+        assert!(
+            (16..=1 << 28).contains(&limit),
+            "pool limit must fit GPU descriptors"
+        );
+        Self {
+            branches: Pool::new(16, limit),
+            data: Pool::new(16, limit),
+            root: Handle { index: 0 },
+            map: None,
+            dirty_branches: BTreeSet::new(),
+            dirty_data: BTreeSet::new(),
+            leaf_counts: LeafCounts::default(),
+            height_map_bytes: 0,
+        }
+    }
     pub fn new(map: HeightMap, limit: usize) -> Self {
         let region = Region {
             origin: [0; 3],
             size: map.side(),
         };
         let material = node::classify(&map, region);
-        let mut leaves = Pool::new(16, limit);
-        let root = Node::Leaf(
-            leaves
-                .allocate(LeafEntry {
-                    material,
-                    region,
-                    parent: None,
-                })
-                .unwrap(),
-        );
-        Self {
-            branches: Pool::new(16, limit),
-            leaves,
-            root,
-            map: Some(map),
-            dirty_branches: BTreeSet::new(),
-            dirty_leaves: BTreeSet::from([0]),
-        }
+        let mut tree = Self::empty(limit);
+        tree.height_map_bytes = map.bytes();
+        tree.map = Some(map);
+        tree.root = tree
+            .allocate(Entry {
+                material,
+                region,
+                parent: None,
+                children: None,
+            })
+            .unwrap();
+        tree
     }
-    pub fn root(&self) -> u32 {
-        self.descriptor(self.root)
+    pub fn root_node(&self) -> Node {
+        self.root
     }
-    /// Cache traversal flags beside the pointer, avoiding a dependent leaf-buffer read.
-    fn descriptor(&self, node: Node) -> u32 {
-        match node {
-            Node::Branch(h) => h.index << 4 | 1,
-            Node::Leaf(h) => {
-                let material = self.leaves.get(h).unwrap().material;
-                h.index << 4 | u32::from(material.mixed) << 3 | material.occupancy << 2 | 3
-            }
-        }
+    pub fn region(&self, node: Node) -> Option<Region> {
+        self.data.get(node).map(|e| e.region)
     }
-    pub fn capacities(&self) -> [usize; 2] {
-        [self.branches.capacity(), self.leaves.capacity()]
+    pub fn node_data(&self, node: Node) -> Option<NodeData> {
+        self.data.get(node).map(|e| e.material)
+    }
+    pub fn children(&self, node: Node) -> Option<[Node; 8]> {
+        Some(self.branches.get(self.data.get(node)?.children?)?.children)
+    }
+    pub fn nodes(&self) -> impl Iterator<Item = Node> + '_ {
+        self.data.iter().map(|(h, _)| h)
     }
     pub fn stats(&self) -> TreeStats {
-        let mut stats = TreeStats {
+        TreeStats {
             branches: self.branches.len(),
-            leaves: self.leaves.len(),
+            leaves: self.data.len() - self.branches.len(),
+            data_nodes: self.data.len(),
             branch_capacity: self.branches.capacity(),
-            leaf_capacity: self.leaves.capacity(),
-            height_map_bytes: self.map.as_ref().map_or(0, HeightMap::bytes),
-            ..Default::default()
-        };
-        for (_, leaf) in self.leaves.iter() {
-            if leaf.material.mixed {
-                stats.deferred_leaves += 1;
-            } else if leaf.material.occupancy == 0 {
-                stats.empty_leaves += 1;
-            } else {
-                stats.solid_leaves += 1;
-            }
+            data_capacity: self.data.capacity(),
+            height_map_bytes: self.height_map_bytes,
+            empty_leaves: self.leaf_counts.empty,
+            solid_leaves: self.leaf_counts.solid,
+            deferred_leaves: self.leaf_counts.deferred,
         }
-        stats
     }
-    pub fn counts(&self) -> [usize; 2] {
-        [self.branches.len(), self.leaves.len()]
-    }
-    pub fn requests(&self) -> Vec<Handle> {
-        self.leaves
+    /// Explicit diagnostic enumeration; normal rendering uses GPU requests.
+    pub fn refinable_leaves(&self) -> Vec<Node> {
+        self.data
             .iter()
-            .filter(|(_, l)| l.material.mixed)
+            .filter(|(_, e)| {
+                self.map.is_some() && e.children.is_none() && e.material.mixed && e.region.size > 1
+            })
             .map(|(h, _)| h)
             .collect()
     }
-    pub fn branch_words(&self, index: u32) -> [u32; 8] {
-        self.branches
-            .at(index)
-            .map(|(_, b)| b.children.map(|node| self.descriptor(node)))
-            .unwrap_or([0; 8])
+    fn allocate(&mut self, e: Entry) -> Option<Node> {
+        let material = e.material;
+        let h = self.data.allocate(e)?;
+        *self.leaf_counts.counter(material) += 1;
+        self.dirty_data.insert(h.index);
+        Some(h)
     }
-    pub fn leaf_words(&self, index: u32) -> [u32; 4] {
-        self.leaves
-            .at(index)
-            .map(|(_, l)| [l.material.occupancy, u32::from(l.material.mixed), 0, 0])
-            .unwrap_or([0; 4])
-    }
-    pub fn slot_allocated(&self, kind: usize, index: u32) -> bool {
-        match kind {
-            0 => self.branches.at(index).is_some(),
-            1 => self.leaves.at(index).is_some(),
-            _ => false,
+    fn changed(&mut self, node: Node) {
+        self.dirty_data.insert(node.index);
+        if let Some(p) = self.data.get(node).unwrap().parent {
+            self.dirty_branches
+                .insert(self.data.get(p.node).unwrap().children.unwrap().index);
         }
     }
-    /// Anchor invalidation logs to the tree submitted for the next feedback capture.
-    pub fn begin_feedback(&mut self) {
-        assert!(
-            self.dirty_branches.is_empty() && self.dirty_leaves.is_empty(),
-            "sync tree before capturing feedback"
-        );
-        self.branches.begin_feedback();
-        self.leaves.begin_feedback();
+    /// Load one level from the terrain source, preserving summaries and compactness.
+    pub fn refine(&mut self, node: Node) -> bool {
+        self.refine_result(node) == Refinement::Split
     }
-    pub fn finish_feedback(&mut self) {
-        self.branches.finish_feedback();
-        self.leaves.finish_feedback();
-    }
-    /// Apply a request only to the allocation visible to its originating GPU batch.
-    pub fn refine_feedback(&mut self, request: Handle) -> bool {
-        self.refine_feedback_result(request) == Refinement::Split
-    }
-    pub fn refine_feedback_result(&mut self, request: Handle) -> Refinement {
-        if !self.leaves.accepts_feedback(request) {
+    fn refine_result(&mut self, node: Node) -> Refinement {
+        let Some(e) = self.data.get(node) else {
             return Refinement::Stale;
-        }
-        self.refine_result(request)
-    }
-    pub fn take_dirty(&mut self) -> [BTreeSet<u32>; 2] {
-        [
-            std::mem::take(&mut self.dirty_branches),
-            std::mem::take(&mut self.dirty_leaves),
-        ]
-    }
-    fn replace(&mut self, parent: Option<Parent>, node: Node) {
-        if let Some(p) = parent {
-            self.branches.get_mut(p.branch).unwrap().children[p.child] = node;
-            self.dirty_branches.insert(p.branch.index);
-        } else {
-            self.root = node;
-        }
-    }
-    pub fn refine(&mut self, request: Handle) -> bool {
-        self.refine_result(request) == Refinement::Split
-    }
-    fn refine_result(&mut self, request: Handle) -> Refinement {
+        };
         let Some(map) = &self.map else {
             return Refinement::NotNeeded;
         };
-        let Some(leaf) = self.leaves.get(request) else {
-            return Refinement::Stale;
-        };
-        if !leaf.material.mixed || leaf.region.size <= 1 {
+        if e.children.is_some() || !e.material.mixed || e.region.size <= 1 {
             return Refinement::NotNeeded;
         }
-        if !self.branches.can_allocate(1) || !self.leaves.can_allocate(8) {
+        if !self.branches.can_allocate(1) || !self.data.can_allocate(8) {
             return Refinement::PoolLimited;
         }
-        let region = leaf.region;
-        let parent = leaf.parent;
+        let region = e.region;
+        let material = e.material;
         let materials = node::split(map, region);
-        let branch = self
+        let block = self
             .branches
             .allocate(Branch {
-                children: [Node::Leaf(request); 8],
-                region,
-                parent,
+                children: [node; 8],
+                owner: node,
             })
             .unwrap();
         let children = std::array::from_fn(|i| {
-            let h = self
-                .leaves
-                .allocate(LeafEntry {
-                    material: materials[i],
-                    region: region.child(i),
-                    parent: Some(Parent { branch, child: i }),
-                })
-                .unwrap();
-            self.dirty_leaves.insert(h.index);
-            Node::Leaf(h)
+            self.allocate(Entry {
+                material: materials[i],
+                region: region.child(i),
+                parent: Some(Parent { node, child: i }),
+                children: None,
+            })
+            .unwrap()
         });
-        self.branches.get_mut(branch).unwrap().children = children;
-        self.dirty_branches.insert(branch.index);
-        self.replace(parent, Node::Branch(branch));
-        self.leaves.remove(request);
-        self.merge_upwards(branch);
+        self.branches.get_mut(block).unwrap().children = children;
+        self.data.get_mut(node).unwrap().children = Some(block);
+        *self.leaf_counts.counter(material) -= 1;
+        self.dirty_branches.insert(block.index);
+        self.changed(node);
+        self.update_upwards(node);
         Refinement::Split
     }
-    /// Inspect only the eight direct children, never descend into other branches.
-    fn merge_material(&self, h: Handle) -> Option<Leaf> {
-        let children = self.branches.get(h)?.children;
-        let mut materials = [Leaf::EMPTY; 8];
-        for (i, child) in children.into_iter().enumerate() {
-            let Node::Leaf(leaf) = child else { return None };
-            materials[i] = self.leaves.get(leaf)?.material;
-        }
-        node::merge(materials)
-    }
-    fn merge_branch(&mut self, h: Handle) -> Option<Node> {
-        let material = self.merge_material(h)?;
-        let b = self.branches.remove(h).unwrap();
-        let parent = b.parent;
-        let region = b.region;
-        // Compatibility guarantees eight leaves. Free them before allocating
-        // the replacement so merging never grows a pool.
-        for child in b.children {
-            let Node::Leaf(leaf) = child else {
-                unreachable!()
-            };
-            self.leaves.remove(leaf);
-        }
-        let leaf = self
-            .leaves
-            .allocate(LeafEntry {
-                material,
-                region,
-                parent,
-            })
-            .unwrap();
-        self.dirty_leaves.insert(leaf.index);
-        let node = Node::Leaf(leaf);
-        self.replace(parent, node);
-        Some(node)
-    }
-    /// A failed merge cannot change its ancestors, so stop immediately.
-    fn merge_upwards(&mut self, mut branch: Handle) {
-        loop {
-            let parent = self.branches.get(branch).unwrap().parent;
-            if self.merge_branch(branch).is_none() {
-                break;
-            }
-            let Some(parent) = parent else { break };
-            branch = parent.branch;
-        }
-    }
-    /// Explicit full-tree diagnostic, including the absence of mergeable branches.
-    pub fn validate(&self) -> Result<usize> {
-        let mut todo = vec![(self.root, None)];
-        let mut seen = HashSet::new();
-        while let Some((n, parent)) = todo.pop() {
-            ensure!(seen.insert(n.identity()), "repeated tree reference");
-            let (region, actual_parent) = match n {
-                Node::Leaf(h) => {
-                    let l = self
-                        .leaves
-                        .get(h)
-                        .ok_or_else(|| anyhow::anyhow!("stale leaf"))?;
-                    ensure!(
-                        l.material.occupancy <= 1 && (!l.material.mixed || l.region.size > 1),
-                        "invalid leaf"
-                    );
-                    (l.region, l.parent)
-                }
-                Node::Branch(h) => {
-                    let b = self
-                        .branches
-                        .get(h)
-                        .ok_or_else(|| anyhow::anyhow!("stale branch"))?;
-                    ensure!(b.region.size > 1, "branch below voxel size");
-                    ensure!(
-                        self.merge_material(h).is_none(),
-                        "noncompact tree: branch {} has compatible leaf children",
-                        h.index
-                    );
-                    for (i, c) in b.children.iter().enumerate() {
-                        todo.push((*c, Some((h, i, b.region.child(i)))));
-                    }
-                    (b.region, b.parent)
-                }
-            };
-            match (parent, actual_parent) {
-                (None, None) => {}
-                (Some((h, i, r)), Some(p)) => ensure!(
-                    p.branch == h && p.child == i && r == region,
-                    "invalid parent or region"
-                ),
-                _ => anyhow::bail!("invalid parent"),
-            }
-        }
-        ensure!(
-            seen.len() == self.branches.len() + self.leaves.len(),
-            "unreachable allocation"
-        );
-        Ok(seen.len())
-    }
-    /// Import an exact packed tree, disabling procedural residency for this scene.
-    pub fn from_packed(words: &[u32], levels: u32, limit: usize) -> Result<Self> {
-        super::packed::validate(words, levels)?;
-        // Allocate only the imported scene; no procedural map or temporary root is needed.
-        let mut tree = Self {
-            branches: Pool::new(16, limit),
-            leaves: Pool::new(16, limit),
-            root: Node::Leaf(Handle { index: 0 }),
-            map: None,
-            dirty_branches: BTreeSet::new(),
-            dirty_leaves: BTreeSet::new(),
+    /// Retain this node's summary and identity; discard only its descendants.
+    /// Imported scenes cannot regenerate discarded detail.
+    pub fn derefine(&mut self, node: Node) -> bool {
+        let Some(e) = self.data.get(node) else {
+            return false;
         };
-        fn build(
-            tree: &mut Tree,
-            words: &[u32],
-            index: usize,
-            region: Region,
-            parent: Option<Parent>,
-        ) -> Result<Node> {
-            let n = words[index + 1];
-            if n & 3 == 3 {
-                let h = tree
-                    .leaves
-                    .allocate(LeafEntry {
-                        material: if n >> 2 == 0 {
-                            Leaf::EMPTY
-                        } else {
-                            Leaf::SOLID
-                        },
-                        region,
-                        parent,
-                    })
-                    .ok_or_else(|| anyhow::anyhow!("leaf pool limit"))?;
-                tree.dirty_leaves.insert(h.index);
-                Ok(Node::Leaf(h))
-            } else {
-                let h = tree
-                    .branches
-                    .allocate(Branch {
-                        children: [tree.root; 8],
-                        region,
-                        parent,
-                    })
-                    .ok_or_else(|| anyhow::anyhow!("branch pool limit"))?;
-                let mut children = [tree.root; 8];
-                for (i, c) in children.iter_mut().enumerate() {
-                    *c = build(
-                        tree,
-                        words,
-                        (n >> 2) as usize + i,
-                        region.child(i),
-                        Some(Parent {
-                            branch: h,
-                            child: i,
-                        }),
-                    )?;
-                }
-                tree.branches.get_mut(h).unwrap().children = children;
-                tree.dirty_branches.insert(h.index);
-                // Children have already been normalized bottom-up during import.
-                // Do not walk into an ancestor while it is still being built.
-                Ok(tree.merge_branch(h).unwrap_or(Node::Branch(h)))
+        if e.children.is_none() {
+            return false;
+        }
+        // The summary is unchanged, so ancestor consistency and compatibility
+        // are unchanged too; only the parent descriptor needs a topology patch.
+        self.drop_children(node);
+        true
+    }
+    fn drop_children(&mut self, node: Node) {
+        let e = self.data.get_mut(node).unwrap();
+        let block = e.children.take().unwrap();
+        let material = e.material;
+        let b = self.branches.remove(block).unwrap();
+        self.dirty_branches.remove(&block.index);
+        for child in b.children {
+            self.release_subtree(child);
+        }
+        *self.leaf_counts.counter(material) += 1;
+        self.changed(node);
+    }
+    fn release_subtree(&mut self, node: Node) {
+        let e = self.data.remove(node).unwrap();
+        self.dirty_data.remove(&node.index);
+        if let Some(block) = e.children {
+            let b = self.branches.remove(block).unwrap();
+            self.dirty_branches.remove(&block.index);
+            for child in b.children {
+                self.release_subtree(child);
+            }
+        } else {
+            *self.leaf_counts.counter(e.material) -= 1;
+        }
+    }
+    /// Restore both invariants at one node whose children are already consistent.
+    fn normalize(&mut self, node: Node) {
+        if let Some(children) = self.children(node) {
+            let materials = children.map(|c| self.node_data(c).unwrap());
+            let summary = node::merge_summarize(materials);
+            if self.node_data(node).unwrap() != summary {
+                self.data.get_mut(node).unwrap().material = summary;
+                self.changed(node);
+            }
+            if node::try_merge_exact(materials).is_some() {
+                self.drop_children(node);
             }
         }
-        tree.root = build(
-            &mut tree,
-            words,
-            0,
-            Region {
-                origin: [0; 3],
-                size: 1 << levels,
-            },
-            None,
-        )?;
-        tree.validate()?;
-        Ok(tree)
+    }
+
+    fn update_upwards(&mut self, mut node: Node) {
+        loop {
+            self.normalize(node);
+            let Some(p) = self.data.get(node).unwrap().parent else {
+                break;
+            };
+            node = p.node;
+        }
     }
 }

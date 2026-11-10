@@ -46,7 +46,7 @@ pub struct HeightMap {
 }
 impl HeightMap {
     pub fn new(levels: u32, max_height: u32) -> Self {
-        assert!((1..=10).contains(&levels));
+        assert!((1..=super::MAX_WORLD_LEVELS).contains(&levels));
         let side = 1u32 << levels;
         let base = (0..side * side)
             .map(|i| {

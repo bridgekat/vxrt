@@ -15,6 +15,7 @@ async fn run() -> Result<()> {
         .request_adapter(&wgpu::RequestAdapterOptions::default())
         .await?;
     check_distant_refinement(&adapter).await?;
+    check_large_world(&adapter).await?;
     check_activity_counters(&adapter).await?;
     check_streaming(&adapter).await?;
     check_settling(&adapter).await?;
@@ -475,6 +476,38 @@ async fn check_distant_refinement(adapter: &wgpu::Adapter) -> Result<()> {
         "visible distant terrain did not refine and settle: split={split}, latest={:?}",
         r.streaming_stats()
     );
+    Ok(())
+}
+
+async fn check_large_world(adapter: &wgpu::Adapter) -> Result<()> {
+    let config = Config {
+        world_levels: 12,
+        ..Default::default()
+    };
+    let mut r = Renderer::new(adapter, config, 33, 19, wgpu::TextureFormat::Rgba8Unorm).await?;
+    let mut splits = 0;
+    for frame in 0..24 {
+        r.render(
+            Vector3::new(2048., 4098., 2048.),
+            [-80., 0.],
+            false,
+            false,
+            frame,
+            None,
+        )?;
+        let pixels = r.read_frame()?;
+        ensure!(
+            pixels.iter().flatten().all(|v| v.is_finite()),
+            "nonfinite level-12 frame"
+        );
+        splits += r.streaming_stats().split;
+    }
+    ensure!(splits > 1, "level-12 world did not refine");
+    ensure!(
+        r.tree_stats().height_map_bytes == 178956968,
+        "incorrect level-12 height pyramid size"
+    );
+    r.check_tree()?;
     Ok(())
 }
 

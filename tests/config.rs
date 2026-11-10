@@ -35,7 +35,7 @@ fn rejects_invalid_shader_parameters() {
             ..Default::default()
         },
         Config {
-            world_levels: 11,
+            world_levels: 13,
             ..Default::default()
         },
         Config {
@@ -50,6 +50,11 @@ fn rejects_invalid_shader_parameters() {
         assert!(config.validate().is_err());
     }
     Config::default().validate().unwrap();
+    for levels in [1, 10, 11, 12] {
+        let config: Config = toml::from_str(&format!("world_levels = {levels}")).unwrap();
+        assert_eq!(config.world_levels, levels);
+        config.validate().unwrap();
+    }
     for splits in [1, 1024, 4096] {
         let config: Config = toml::from_str(&format!("splits_per_frame = {splits}")).unwrap();
         assert_eq!(config.splits_per_frame, splits);

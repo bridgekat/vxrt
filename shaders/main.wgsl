@@ -28,6 +28,9 @@ var<storage, read_write> frame: array<vec4<f32>>;
 @group(0) @binding(3)
 var<storage, read_write> beams: array<f32>;
 
+@group(0) @binding(4)
+var<storage, read> node_data: array<vec4<u32>>;
+
 @group(0) @binding(5)
 var<storage, read_write> requests: array<u32>;
 var<private> request_slot: u32;
@@ -153,13 +156,21 @@ fn cast_ray(reference: vec3<f32>, direction: vec3<f32>) -> f32 {
             data = bitcast<u32>(stack[stp].w);
         }
         let pos = vec3<u32>(test_point);
+        var stopped_at_lod = false;
         while (data & 3u) != 3u {
+            if !lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
+                let index = branches[(data >> 4u) * 9u + 8u];
+                let summary = node_data[index];
+                data = (index << 4u) | (summary.y << 3u) | (summary.x << 2u) | 3u;
+                stopped_at_lod = true;
+                break;
+            }
             if stp >= 20u {
                 return 1.0;
             }
             stack[stp] = vec4<f32>(box.xyz, bitcast<f32>(data));
             stp++;
-            var datap = (data >> 4u) * 8u;
+            var datap = (data >> 4u) * 9u;
             let mid = box.xyz + box.w / 2.0;
             if test_point.x >= mid.x {
                 datap += 1u;
@@ -175,14 +186,10 @@ fn cast_ray(reference: vec3<f32>, direction: vec3<f32>) -> f32 {
             }
             box.w /= 2.0;
             data = branches[datap];
-            if (data & 3u) != 3u && !lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
-                // Treat an LOD stop as a solid leaf.
-                data = 7u;
-            }
         }
         // Occupancy and deferred flags are cached in each descriptor. Material
-        // payloads remain in the leaf pool; traversal does not need to fetch them.
-        if (data & 8u) != 0u && p.scene.w != 0u && lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
+        // payloads for all nodes live in the data pool.
+        if !stopped_at_lod && (data & 8u) != 0u && p.scene.w != 0u && lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
             // A deferred leaf is solid, so this ray returns immediately below.
             // Encode index + 1; zero means no request from this invocation.
             requests[request_slot] = (data >> 4u) + 1u;
@@ -299,8 +306,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     request_slot = pixel.y * extent.x + pixel.x;
-    if beam_mode { request_slot += p.frame.x * p.frame.y; }
-    if p.scene.w != 0u { requests[request_slot] = 0u; }
+    if beam_mode {
+        request_slot += p.frame.x * p.frame.y;
+    }
+    if p.scene.w != 0u {
+        requests[request_slot] = 0u;
+    }
     var beam_result = 0.0;
     if p.beam.x < 1u && p.frame.z == 0u {
         let base = pixel / (p.beam.y / p.beam.w);

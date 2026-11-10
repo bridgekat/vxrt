@@ -15,6 +15,7 @@ pub struct Config {
     pub sky_intensity: f32,
     pub sun_intensity: f32,
     pub march_budget: u32,
+    pub splits_per_frame: u32,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -30,6 +31,7 @@ impl Default for Config {
             sky_intensity: 1.0,
             sun_intensity: 256.0,
             march_budget: 1024,
+            splits_per_frame: 1024,
         }
     }
 }
@@ -45,6 +47,10 @@ impl Config {
         Ok(config)
     }
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            (1..=4096).contains(&self.splits_per_frame),
+            "splits_per_frame must be 1..=4096"
+        );
         ensure!(
             (1..=65536).contains(&self.march_budget),
             "march_budget must be 1..=65536"

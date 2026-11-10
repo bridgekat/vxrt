@@ -1,9 +1,12 @@
 mod readback;
+mod streaming;
 
-use crate::{config::Config, world};
+use crate::{config::Config, core::tree::Tree};
 use anyhow::{Result, ensure};
 use bytemuck::{Pod, Zeroable};
 use cgmath::{Deg, Matrix4, SquareMatrix, Vector3, perspective};
+use streaming::Streaming;
+pub use streaming::StreamingStats;
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -31,7 +34,7 @@ pub struct Renderer {
     pipeline: wgpu::ComputePipeline,
     present: wgpu::RenderPipeline,
     uniforms: [wgpu::Buffer; 2],
-    tree: wgpu::Buffer,
+    streaming: Streaming,
     frame: wgpu::Buffer,
     beams: wgpu::Buffer,
     groups: Vec<wgpu::BindGroup>,
@@ -65,22 +68,7 @@ impl Renderer {
             })
             .await?;
         tracing::info!(adapter=?adapter.get_info(),"GPU selected");
-        let tree_data = world::generate(config.world_levels, config.max_height);
-        let tree_size = tree_data.len() as u64 * 4;
-        ensure!(
-            tree_size <= limits.max_storage_buffer_binding_size
-                && tree_size <= limits.max_buffer_size,
-            "octree needs {tree_size} bytes, exceeding adapter limits; lower world_levels"
-        );
-        let tree = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("octree"),
-            size: tree_size,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-        queue.write_buffer(&tree, 0, bytemuck::cast_slice(&tree_data));
+        let streaming = Streaming::new(&device, &config);
         let uniforms = std::array::from_fn(|_| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("frame parameters"),
@@ -131,7 +119,7 @@ impl Renderer {
         });
         let (width, height) = Self::dimensions(&config, width, height);
         let (frame, beams) = Self::buffers(&device, width, height)?;
-        let groups = Self::groups(&device, &pipeline, &uniforms, &tree, &frame, &beams);
+        let groups = Self::groups(&device, &pipeline, &uniforms, &streaming, &frame, &beams);
         let present_group = Self::present_group(&device, &present, &uniforms[1], &frame);
         Ok(Self {
             device,
@@ -140,7 +128,7 @@ impl Renderer {
             pipeline,
             present,
             uniforms,
-            tree,
+            streaming,
             frame,
             beams,
             groups,
@@ -205,7 +193,7 @@ impl Renderer {
         device: &wgpu::Device,
         pipeline: &wgpu::ComputePipeline,
         uniforms: &[wgpu::Buffer; 2],
-        tree: &wgpu::Buffer,
+        streaming: &Streaming,
         frame: &wgpu::Buffer,
         beams: &wgpu::Buffer,
     ) -> Vec<wgpu::BindGroup> {
@@ -222,7 +210,7 @@ impl Renderer {
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: tree.as_entire_binding(),
+                            resource: streaming.branches.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
@@ -231,6 +219,14 @@ impl Renderer {
                         wgpu::BindGroupEntry {
                             binding: 3,
                             resource: beams.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: streaming.leaves.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: streaming.requests.as_entire_binding(),
                         },
                     ],
                 })
@@ -273,7 +269,7 @@ impl Renderer {
             &self.device,
             &self.pipeline,
             &self.uniforms,
-            &self.tree,
+            &self.streaming,
             &self.frame,
             &self.beams,
         );
@@ -289,7 +285,20 @@ impl Renderer {
         profiler: bool,
         sample_index: u32,
         target: Option<&wgpu::TextureView>,
-    ) {
+    ) -> Result<()> {
+        self.streaming.process(&self.device, &self.config, path)?;
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        if self.streaming.sync(&self.device, &mut encoder) {
+            self.groups = Self::groups(
+                &self.device,
+                &self.pipeline,
+                &self.uniforms,
+                &self.streaming,
+                &self.frame,
+                &self.beams,
+            );
+        }
+        encoder.clear_buffer(&self.streaming.requests, 0, None);
         let camera = ([position.x, position.y, position.z], rotation);
         if path != self.last_path || (path && self.last_camera != Some(camera)) {
             self.samples = 0;
@@ -326,7 +335,12 @@ impl Renderer {
                 u32::from(profiler),
             ],
             beam: [1, 1, 0, 4],
-            scene: [self.config.world_levels, self.config.march_budget, 0, 0],
+            scene: [
+                self.config.world_levels,
+                self.config.march_budget,
+                self.streaming.tree.root(),
+                0,
+            ],
             lighting: [
                 self.config.lod_quality,
                 self.config.sky_intensity,
@@ -345,7 +359,6 @@ impl Renderer {
         params.beam = [if path { 1 } else { 0 }, 4, 1, 1];
         self.queue
             .write_buffer(&self.uniforms[1], 0, bytemuck::bytes_of(&params));
-        let mut encoder = self.device.create_command_encoder(&Default::default());
         // Separate passes provide storage visibility between coarse and fine dispatches.
         for i in 0..2 {
             // Jittered path rays trace from the camera; beam skipping is an interactive optimization.
@@ -380,51 +393,54 @@ impl Renderer {
             pass.set_bind_group(0, &self.present_group, &[]);
             pass.draw(0..3, 0..1);
         }
+        let feedback = if path {
+            None
+        } else {
+            self.streaming.capture(&self.device, &mut encoder)
+        };
         self.queue.submit([encoder.finish()]);
+        if let Some((buffer, tx)) = feedback {
+            buffer
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = tx.send(result);
+                });
+        }
         self.samples = if path {
             self.samples.saturating_add(1)
         } else {
             0
         };
+        Ok(())
     }
-    fn read_tree(&self) -> Result<Vec<u32>> {
-        let header = self.read_buffer(&self.tree, 4)?;
-        let count = u32::from_ne_bytes(header.try_into().unwrap());
-        ensure!(
-            count > 0 && (u64::from(count) + 1) * 4 <= self.tree.size(),
-            "invalid GPU node count"
-        );
-        let bytes = self.read_buffer(&self.tree, (u64::from(count) + 1) * 4)?;
-        Ok(bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|b| u32::from_ne_bytes(*b))
-            .collect())
+    pub fn tree_stats(&self) -> crate::core::tree::TreeStats {
+        self.streaming.tree.stats()
     }
-
-    /// Return stored and reachable node counts after validating the GPU tree.
+    pub fn streaming_stats(&self) -> StreamingStats {
+        self.streaming.stats
+    }
+    pub fn feedback_pending(&self) -> bool {
+        self.streaming.feedback_pending()
+    }
     pub fn check_tree(&self) -> Result<(u32, usize)> {
-        let words = self.read_tree()?;
-        let reachable = crate::octree::validate(&words, self.config.world_levels)?;
-        Ok((words[0], reachable))
+        let reachable = self.streaming.tree.validate()?;
+        let branches =
+            self.read_buffer(&self.streaming.branches, self.streaming.branches.size())?;
+        let leaves = self.read_buffer(&self.streaming.leaves, self.streaming.leaves.size())?;
+        self.streaming.verify(&branches, &leaves)?;
+        Ok((reachable as u32, reachable))
     }
-
     pub fn compact_tree(&mut self) -> Result<()> {
-        let words = self.read_tree()?;
-        let compact = crate::octree::compact(&words, self.config.world_levels)?;
-        self.write_tree(&compact)
+        if !self.last_path {
+            self.streaming.tree.compact();
+            self.samples = 0;
+        }
+        Ok(())
     }
-
-    /// Validate and replace the tree within its existing capacity, resetting accumulation.
-    pub fn write_tree(&mut self, words: &[u32]) -> Result<()> {
-        crate::octree::validate(words, self.config.world_levels)?;
-        ensure!(
-            words.len() as u64 * 4 <= self.tree.size(),
-            "tree exceeds GPU allocation"
-        );
-        self.queue
-            .write_buffer(&self.tree, 0, bytemuck::cast_slice(words));
+    /// Replace the procedural scene with an exact packed tree (streaming disabled).
+    pub fn replace_packed_scene(&mut self, words: &[u32]) -> Result<()> {
+        let tree = Tree::from_packed(words, self.config.world_levels, self.streaming.limit)?;
+        self.streaming.replace(tree);
         self.samples = 0;
         Ok(())
     }

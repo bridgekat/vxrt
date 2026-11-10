@@ -14,13 +14,19 @@ async fn run() -> Result<()> {
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions::default())
         .await?;
+    check_distant_refinement(&adapter).await?;
+    check_activity_counters(&adapter).await?;
+    check_streaming(&adapter).await?;
+    check_settling(&adapter).await?;
     for coherent_sampling in [true, false] {
         let config = Config {
+            world_levels: 8,
             coherent_sampling,
             ..Default::default()
         };
         let mut r =
             Renderer::new(&adapter, config, 65, 37, wgpu::TextureFormat::Rgba8Unorm).await?;
+        r.replace_packed_scene(&vxrt::core::packed::generate_terrain(8, 256))?;
         if coherent_sampling {
             support::sampling::check(&r).await?;
         }
@@ -42,7 +48,7 @@ async fn run() -> Result<()> {
         let position = Vector3::new(128.0, 258.0, 240.0);
         let rotation = [-45.0, 0.0];
         for i in 0..3 {
-            r.render(position, rotation, false, false, i, Some(&view));
+            r.render(position, rotation, false, false, i, Some(&view))?;
         }
         let pixels = r.read_frame()?;
         ensure!(
@@ -57,19 +63,19 @@ async fn run() -> Result<()> {
         ensure!(allocated >= reachable as u32, "bad tree count");
         // Verify compaction preserves the rendered geometry.
         r.compact_tree()?;
-        r.render(position, rotation, false, false, 0, None);
+        r.render(position, rotation, false, false, 0, None)?;
         ensure!(
             r.read_frame()? == pixels,
             "compaction changed static rendering"
         );
-        r.render(position, rotation, true, false, 0, None);
+        r.render(position, rotation, true, false, 0, None)?;
         let a = r.read_frame()?;
         let tree_stats = r.check_tree()?;
-        r.render(position, rotation, true, false, 1, None);
+        r.render(position, rotation, true, false, 1, None)?;
         let average = r.read_frame()?;
         ensure!(r.samples == 2, "path sample counter");
         r.samples = 0;
-        r.render(position, rotation, true, false, 1, None);
+        r.render(position, rotation, true, false, 1, None)?;
         let b = r.read_frame()?;
         ensure!(
             r.check_tree()? == tree_stats,
@@ -95,11 +101,11 @@ async fn run() -> Result<()> {
             }
         }
         r.samples = 0;
-        r.render(position, rotation, true, false, 0, None);
+        r.render(position, rotation, true, false, 0, None)?;
         ensure!(r.read_frame()? == a, "sample replay is not deterministic");
-        r.render(position, [-40.0, 0.0], true, false, 0, None);
+        r.render(position, [-40.0, 0.0], true, false, 0, None)?;
         ensure!(r.samples == 1, "camera change failed to reset accumulation");
-        r.render(position, rotation, false, false, 0, None);
+        r.render(position, rotation, false, false, 0, None)?;
         ensure!(r.samples == 0, "interactive mode must not accumulate");
         ensure!(
             r.read_frame()? == pixels,
@@ -107,18 +113,18 @@ async fn run() -> Result<()> {
         );
         r.resize(64, 32)?;
         ensure!(r.samples == 0, "resize must reset samples");
-        r.render(position, rotation, true, false, 2, None);
+        r.render(position, rotation, true, false, 2, None)?;
         ensure!(r.samples == 1, "first sample after resize");
         ensure!(
             r.read_frame()?.iter().flatten().all(|f| f.is_finite()),
             "non-finite path output"
         );
         r.resize(321, 181)?;
-        r.render(position, rotation, false, false, 0, None);
+        r.render(position, rotation, false, false, 0, None)?;
         std::fs::create_dir_all("target/smoke")?;
         r.save_png(format!("target/smoke/{coherent_sampling}-interactive.png"))?;
         for i in 0..32 {
-            r.render(position, rotation, true, false, i, None);
+            r.render(position, rotation, true, false, i, None)?;
         }
         r.save_png(format!("target/smoke/{coherent_sampling}-path.png"))?;
         check_enclosed_room(&mut r)?;
@@ -126,7 +132,10 @@ async fn run() -> Result<()> {
     }
     let mut tiny = Renderer::new(
         &adapter,
-        Config::default(),
+        Config {
+            world_levels: 8,
+            ..Default::default()
+        },
         17,
         13,
         wgpu::TextureFormat::Rgba8Unorm,
@@ -140,7 +149,7 @@ async fn run() -> Result<()> {
             false,
             i,
             None,
-        );
+        )?;
     }
     tiny.resize(1, 1)?;
     tiny.render(
@@ -150,7 +159,7 @@ async fn run() -> Result<()> {
         false,
         0,
         None,
-    );
+    )?;
     ensure!(
         tiny.read_frame()?.iter().flatten().all(|f| f.is_finite()),
         "1x1 viewport failed"
@@ -175,7 +184,7 @@ async fn run() -> Result<()> {
             wgpu::TextureFormat::Rgba8Unorm,
         )
         .await?;
-        r.write_tree(&[1, 3])?;
+        r.replace_packed_scene(&[1, 3])?;
         r.render(
             Vector3::new(1.0, 1.0, 1.0),
             [0.0, 0.0],
@@ -183,7 +192,7 @@ async fn run() -> Result<()> {
             false,
             0,
             None,
-        );
+        )?;
         let pixel = r.read_frame()?[0];
         if march_budget == 1 {
             ensure!(pixel[..3] == [0.0; 3], "march budget was not applied");
@@ -195,7 +204,7 @@ async fn run() -> Result<()> {
         }
     }
     println!(
-        "GPU smoke passed: static rendering, accumulation, resize, compaction, and configurable march budget. Images: target/smoke/"
+        "GPU smoke passed: streaming, pool growth, scatter uploads, frozen accumulation, resize, compaction, and march budget. Images: target/smoke/"
     );
     Ok(())
 }
@@ -230,7 +239,7 @@ fn check_enclosed_room(r: &mut Renderer) -> Result<()> {
         let mut words = vec![0];
         build(&mut words, 0, [0; 3], 8, open);
         words.insert(0, words.len() as u32);
-        r.write_tree(&words)?;
+        r.replace_packed_scene(&words)?;
         for index in 0..8 {
             r.render(
                 Vector3::new(128.0, 128.0, 128.0),
@@ -239,7 +248,7 @@ fn check_enclosed_room(r: &mut Renderer) -> Result<()> {
                 false,
                 index,
                 None,
-            );
+            )?;
         }
         let frame = r.read_frame()?;
         ensure!(
@@ -255,6 +264,271 @@ fn check_enclosed_room(r: &mut Renderer) -> Result<()> {
             ensure!(
                 frame.iter().all(|p| p[..3] == [0.0; 3]),
                 "closed non-emissive room leaked environment light"
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn check_streaming(adapter: &wgpu::Adapter) -> Result<()> {
+    let config = Config {
+        world_levels: 8,
+        splits_per_frame: 256,
+        ..Default::default()
+    };
+    let mut r = Renderer::new(adapter, config, 65, 37, wgpu::TextureFormat::Rgba8Unorm).await?;
+    let camera = Vector3::new(128., 258., 240.);
+    for i in 0..32 {
+        r.render(camera, [-45., 0.], false, false, i, None)?;
+        r.read_frame()?;
+        r.check_tree()?;
+    }
+    std::fs::create_dir_all("target/smoke")?;
+    r.save_png("target/smoke/streaming.png")?;
+    check_overlay(&mut r)?;
+    let grown = r.check_tree()?;
+    ensure!(grown.0 > 16, "GPU feedback did not refine and grow pools");
+    for i in 0..4 {
+        r.render(camera, [-45., 0.], true, false, i, None)?;
+        r.read_frame()?;
+        ensure!(r.check_tree()? == grown, "tree changed while accumulating");
+    }
+    let far = Vector3::new(4096., 4096., 4096.);
+    r.render(far, [0., 0.], false, false, 0, None)?;
+    r.read_frame()?;
+    ensure!(
+        r.check_tree()? == grown,
+        "moving away discarded resident detail"
+    );
+    for i in 0..16 {
+        r.render(camera, [-45., 0.], false, false, i, None)?;
+        r.read_frame()?;
+        r.check_tree()?;
+    }
+    ensure!(r.check_tree()?.0 > 16, "resident detail was lost");
+    Ok(())
+}
+
+fn check_overlay(r: &mut Renderer) -> Result<()> {
+    use vxrt::stats_overlay::{OverlayStats, StatsOverlay};
+    let size = [640, 360];
+    let texture = r.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("stats preview"),
+        size: wgpu::Extent3d {
+            width: size[0],
+            height: size[1],
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+    let mut overlay = StatsOverlay::new(&r.device, wgpu::TextureFormat::Rgba8Unorm);
+    let stats = OverlayStats {
+        tree: r.tree_stats(),
+        streaming: r.streaming_stats(),
+        fps: 60.,
+        position: [128., 258., 240.],
+        ..Default::default()
+    };
+    for i in 0..2 {
+        r.render(
+            Vector3::new(128., 258., 240.),
+            [-45., 0.],
+            true,
+            false,
+            i,
+            Some(&view),
+        )?;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(size[0] as f32, size[1] as f32),
+            )),
+            time: Some(i as f64),
+            ..Default::default()
+        };
+        overlay.draw(r, &view, input, size, &stats);
+    }
+    let buffer = r.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("overlay pixels"),
+        size: u64::from(size[0] * size[1] * 4),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let mut encoder = r.device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size[0] * 4),
+                rows_per_image: Some(size[1]),
+            },
+        },
+        wgpu::Extent3d {
+            width: size[0],
+            height: size[1],
+            depth_or_array_layers: 1,
+        },
+    );
+    r.queue.submit([encoder.finish()]);
+    let pixels = r.read_buffer(&buffer, buffer.size())?;
+    image::RgbaImage::from_raw(size[0], size[1], pixels)
+        .unwrap()
+        .save("target/smoke/stats-overlay.png")?;
+    Ok(())
+}
+
+async fn check_settling(adapter: &wgpu::Adapter) -> Result<()> {
+    for (levels, camera) in [
+        (8, Vector3::new(128., 258., 240.)),
+        (10, Vector3::new(512., 300., 900.)),
+    ] {
+        let config = Config {
+            world_levels: levels,
+            ..Default::default()
+        };
+        let mut r =
+            Renderer::new(adapter, config, 129, 73, wgpu::TextureFormat::Rgba8Unorm).await?;
+        let mut quiet = 0;
+        for frame in 0..512 {
+            r.render(camera, [-35., 0.], false, false, frame, None)?;
+            r.read_frame()?;
+            let stats = r.streaming_stats();
+            if stats.feedback_frame.is_some() {
+                quiet = if stats.requested == 0 && stats.uploaded_nodes() == 0 {
+                    quiet + 1
+                } else {
+                    0
+                };
+                if quiet >= 4 {
+                    break;
+                }
+            }
+        }
+        ensure!(
+            quiet >= 4,
+            "stationary streaming did not settle: {:?}",
+            r.streaming_stats()
+        );
+        let streamed = r.read_frame()?;
+        r.replace_packed_scene(&vxrt::core::packed::generate_terrain(levels, 256))?;
+        r.render(camera, [-35., 0.], false, false, 0, None)?;
+        let exact = r.read_frame()?;
+        let changed = streamed
+            .iter()
+            .zip(&exact)
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(a, b)| (a - b).abs() > 1e-5))
+            .count();
+        ensure!(
+            changed == 0,
+            "settled streamed tree differs from exact terrain in {changed} pixels (levels={levels})"
+        );
+    }
+    Ok(())
+}
+
+async fn check_distant_refinement(adapter: &wgpu::Adapter) -> Result<()> {
+    let mut r = Renderer::new(
+        adapter,
+        Config::default(),
+        65,
+        37,
+        wgpu::TextureFormat::Rgba8Unorm,
+    )
+    .await?;
+    let camera = Vector3::new(512., 1026., 512.);
+    let mut split = 0;
+    let mut quiet = 0;
+    for i in 0..256 {
+        r.render(camera, [-80., 0.], false, false, i, None)?;
+        r.read_frame()?;
+        let stats = r.streaming_stats();
+        split += stats.split;
+        if stats.feedback_frame.is_some() {
+            quiet = if stats.requested == 0 && stats.uploaded_nodes() == 0 {
+                quiet + 1
+            } else {
+                0
+            };
+        }
+        if quiet >= 4 {
+            break;
+        }
+    }
+    ensure!(
+        split > 1 && quiet >= 4,
+        "visible distant terrain did not refine and settle: split={split}, latest={:?}",
+        r.streaming_stats()
+    );
+    Ok(())
+}
+
+async fn check_activity_counters(adapter: &wgpu::Adapter) -> Result<()> {
+    let config = Config {
+        world_levels: 8,
+        splits_per_frame: 1,
+        ..Default::default()
+    };
+    let mut r = Renderer::new(adapter, config, 33, 19, wgpu::TextureFormat::Rgba8Unorm).await?;
+    let camera = Vector3::new(128., 258., 240.);
+    let mut saw_budget = false;
+    for i in 0..24 {
+        r.render(camera, [-45., 0.], false, false, i, None)?;
+        r.read_frame()?;
+        let s = r.streaming_stats();
+        ensure!(s.frame == u64::from(i) + 1, "wrong streaming frame number");
+        ensure!(
+            s.requested
+                == s.split
+                    + s.budget_deferred
+                    + s.pool_limited
+                    + s.stale
+                    + s.not_needed
+                    + s.paused_discarded,
+            "unaccounted feedback requests: {s:?}"
+        );
+        ensure!(s.split <= 1, "split budget exceeded");
+        if let Some(frame) = s.feedback_frame {
+            ensure!(
+                frame < s.frame,
+                "feedback frame is not older than consuming frame"
+            );
+        } else {
+            ensure!(
+                s.requested == 0,
+                "no batch must report no received requests"
+            );
+        }
+        if i == 0 {
+            ensure!(s.uploaded_nodes() == 1, "initial root upload count");
+        }
+        saw_budget |= s.budget_deferred > 0;
+    }
+    ensure!(saw_budget, "did not exercise budget-deferred feedback");
+    for i in 0..3 {
+        r.render(camera, [-45., 0.], true, false, i, None)?;
+        r.read_frame()?;
+        let s = r.streaming_stats();
+        ensure!(
+            s.split == 0 && s.uploaded_nodes() == 0,
+            "frozen rendering changed nodes"
+        );
+        if i > 0 {
+            ensure!(
+                s.requested == 0,
+                "request count was not reset after paused feedback discard"
             );
         }
     }

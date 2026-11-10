@@ -2,38 +2,38 @@
 
 ## Source layout
 
+The `core` module contains CPU algorithms and has no dependency on windowing or GPU APIs. `renderer` owns device resources, command ordering, transfers, and readback. The application handles input and presentation, while integration tests exercise both layers.
+
 | File | Responsibility |
 | --- | --- |
-| `src/main.rs` | Command-line entry points and logging |
-| `src/lib.rs` | Shared configuration, terrain, shaders, and renderer API |
-| `tests/config.rs`, `tests/world.rs`, `tests/octree.rs`, `tests/shaders.rs` | Configuration, terrain, octree, and shader integration checks |
-| `src/app.rs` | Window, input, camera motion, surface presentation, and event loop |
-| `src/config.rs` | TOML configuration and parameter validation |
-| `src/world.rs` | CPU terrain generation and packed octree construction |
-| `src/renderer.rs` | GPU resources, dispatch, accumulation state, and tree upload |
-| `src/renderer/readback.rs` | GPU readback and screenshots |
-| `src/octree.rs` | CPU validation and compaction of packed trees |
-| `src/shaders.rs` | Embedded GPU program assembly |
-| `tests/smoke.rs` | GPU rendering checks, controlled scenes, and preview generation |
-| `tests/support/sampling.rs` / `tests/support/sampling.wgsl` | GPU sampling diagnostics against analytic integrals |
-| `shaders/sampling.wgsl` | Sample dimensions, direction distributions, PDFs, and MIS weights |
-| `shaders/main.wgsl` | Traversal, interactive shading, and path tracing |
+| `src/core/terrain.rs` | Procedural height function and immutable min/max pyramid |
+| `src/core/node.rs` | Regions, local occupancy classification, split results, and leaf compatibility |
+| `src/core/pool.rs` | Stable slots, freelists, doubling capacity, and feedback invalidation logs |
+| `src/core/tree.rs` | Runtime topology, refinement, merging, validation, and dirty slots |
+| `src/core/packed.rs` | Packed scene import validation and independent exact reference generation |
+| `src/renderer.rs` | GPU pipelines, dispatch, accumulation, and scene replacement |
+| `src/renderer/streaming.rs` | Async refinement feedback, per-frame counters, pool growth, and scatter uploads |
+| `src/renderer/readback.rs` | Synchronous diagnostic readback and scene PNG export |
+| `src/stats_overlay.rs` | Read-only egui diagnostics composited over presentation |
+| `src/config.rs` | TOML settings and parameter validation |
+| `src/app.rs` | Window, input, camera motion, and event loop |
+| `src/main.rs` | CLI entry point and logging |
+| `src/shaders.rs` | Embedded shader assembly |
+| `shaders/main.wgsl` | Traversal, interactive shading, and path transport |
+| `shaders/sampling.wgsl` | Sample sequences, distributions, PDFs, and MIS weights |
+| `shaders/scatter.wgsl` | Apply indexed slot updates before traversal |
 | `shaders/present.wgsl` | Fullscreen presentation and gamma encoding |
+| `tests/{terrain,node,pool,tree,packed,config,shaders}.rs` | CPU algorithms, settings, and shader validation |
+| `tests/smoke.rs` | GPU execution, convergence, reference-image comparisons, and overlay previews |
+| `tests/support/sampling.rs`, `tests/support/sampling.wgsl` | GPU sampling diagnostics against analytic integrals |
 
-## Terrain and octree representation
+`Tree` is the runtime representation. The packed scene format is only an input/reference encoding, not a second runtime tree implementation. It has a node-count header followed by tagged words: branch words point to eight contiguous packed children, and leaf words contain occupancy 0 or 1. Import validates pointers, depth, tags, and occupancy, ignores unreachable storage, and constructs the runtime pools. Exact merging always uses `Tree::compact` and the local compatibility rule in `node.rs`.
 
-A world is a cube with side length `2^world_levels`. The tree buffer begins with a 32-bit node count followed by 32-bit node words. Low bits encode node state; upper bits hold either a child pointer or a leaf material:
+## Tree generation and streaming
 
-| Node word | Meaning |
-| --- | --- |
-| `(child_pointer << 2) \| 1` | Internal node with eight contiguous children |
-| `(material << 2) \| 3` | Leaf; material zero is empty and nonzero is solid |
+The CPU owns a sparse voxel tree backed by separate branch and leaf pools. Interactive rays request refinement from baked height bounds; the CPU splits and merges nodes, then uploads changed slots through scatter writes. Generated detail remains resident, and path tracing freezes topology. Deferred leaves render as coarse solid previews.
 
-Child indices encode X, Y, and Z in bits 0, 1, and 2 respectively.
-
-Terrain uses five-octave interpolated noise, a composed height function with a +64 offset, and an exclusive maximum-height cutoff: voxels with `y >= max_height` are empty, including at leaf resolution. Integer hash arithmetic explicitly wraps. The CPU builds the tree and merges identical leaf children bottom-up before upload.
-
-The GPU reads the completed tree without modifying it. View-dependent level of detail (LOD) can stop traversal at an internal node and treat that region as a coarse opaque cell. Tree checking and compaction synchronize with the GPU before reading node data. CPU validation checks the header, node tags, pointer bounds, repeated references, and depth. Compaction removes unreachable storage and merges identical leaf children. Replacement trees are validated before upload and must fit the existing GPU buffer; uploading resets accumulation.
+See [sparse voxel tree design](tree.md) for data layouts, local operations, allocation, GPU-visible snapshot invariants, command ordering, feedback counters, and residency policy.
 
 ## Interactive rendering
 
@@ -45,7 +45,7 @@ Traversal uses a 20-entry stack and a configurable `march_budget` (default 1024,
 
 ## Path tracing
 
-Path tracing freezes the camera so geometry and camera-dependent LOD stay stable throughout an accumulation sequence. The terrain is fully constructed before either rendering mode begins.
+Path tracing freezes the camera and pauses CPU splits and merging, including the G control. GPU rays do not request refinement while accumulating. Completed feedback can be discarded without applying it. The resident SVO and camera-dependent LOD remain stable; missing detail is rendered as coarse solid geometry even for shadow and continuation rays. Returning to interactive mode resumes streaming.
 
 Path rays trace from the camera without beam skipping. Camera jitter samples uniformly within each pixel's footprint. Transport uses normalized geometric voxel-face normals and a neutral Lambertian BRDF `0.8 / pi` (constant RGB albedo 0.8).
 
@@ -84,6 +84,14 @@ Path samples are averaged in linear light. Mode switches, camera changes, render
 
 Color and beam data reside in storage buffers. The presentation shader bilinearly samples the color buffer and applies gamma 2.2 encoding through a non-sRGB target view. Screenshot export uses the same gamma curve. Display/export clamps out-of-range values; transport tests check that linear radiance is finite and nonnegative before display conversion.
 
+## Tree statistics
+
+The egui overlay displays branch and leaf counts versus pool capacity, free slots, exact empty/solid and deferred leaf counts, live versus reserved GPU pool bytes, baked height-bound bytes, and pending feedback. It also shows FPS or accumulated samples, camera position, and whether refinement is paused. Tree counts are sampled on the CPU every 250 ms; they do not trigger GPU readback. Activity counters update every render frame: GPU-to-CPU requests count unique marked leaf slots in the batch received during that frame, while CPU-to-GPU updates count unique live branch and leaf slots patched that frame. The latter excludes frame uniforms, unchanged pool data copied during growth, and freed unreachable slots. Feedback carries its source frame number because it usually arrives later than the rays that generated it. No received batch is explicitly distinguished from a received batch containing zero requests.
+
+Additional counters report successful splits, unprocessed requests beyond the split budget, pool-capacity failures, and stale requests. A stationary view should settle to zero requests and zero node patches once its visible LOD demand has been serviced, provided pool capacity is sufficient. A finite march budget can still truncate rays; zero requests is not proof of complete geometric coverage. The total deferred-leaf count can remain nonzero because unseen or sufficiently coarse regions do not need refinement. GPU memory numbers cover branch and leaf pools only, excluding feedback buffers, upload staging, framebuffers, and CPU allocator metadata. Height-bound storage reports pyramid element bytes.
+
+C validates the tree, compares resident GPU slots, and logs the current statistics. The overlay is composited after scene presentation and is not stored in path accumulation or scene PNG exports. The GPU smoke suite writes a separate overlay preview to `target/smoke/stats-overlay.png`.
+
 ## Validation and limits
 
 `cargo test --locked` runs integration tests for terrain occupancy and height cutoffs, malformed octree rejection, compaction preservation and idempotence, configuration constraints, and the render and diagnostic shaders. The GPU smoke test is ignored by default because it requires a graphics adapter. `cargo test --release --locked --test smoke -- --ignored --nocapture` also checks:
@@ -91,11 +99,13 @@ Color and beam data reside in storage buffers. The presentation shader bilinearl
 - Hemisphere support, normalized directions, cone solid-angle moments, sample range, dimension decorrelation, and seed/index/pixel separation.
 - Shared bounce values with per-pixel camera jitter in coherent mode, and distinct bounce values in decorrelated mode.
 - MIS estimates against analytic integrals for an aligned sun, a tilted sun, a sun centered on the horizon, and a constant environment. Distribution checks use 65,536 samples; integral tolerances are 2%.
-- Finite nonnegative transport, exact sample replay on the same adapter, numerical accumulation, read-only geometry, camera/resize resets, and compaction in both sampling modes.
+- Finite nonnegative transport, exact sample replay on the same adapter, numerical accumulation, frozen geometry, camera/resize resets, and compaction in both sampling modes.
+- GPU feedback-driven refinement, pool doubling, scattered updates checked against CPU slots, retention after moving the camera far away, and egui overlay rendering.
+- Per-frame request/update accounting, convergence to zero work for fixed views (including distant visible terrain), and agreement with exact terrain rendering.
 - Configurable march budgets through the complete GPU pipeline: a deliberately truncated empty-world ray and its successful completion with a larger budget.
 - A fully enclosed non-emissive room receiving zero environment light, and an open room receiving positive light.
 
-The renderer still approximates geometry through camera-dependent LOD, including for secondary rays. Traversal-budget failures can darken an image; the transport equations do not remove that geometric/traversal approximation. Floating-point backend differences can affect results. GPU diagnostics are correctness checks, not a cross-backend image-equivalence or performance benchmark. Collision detection is not implemented.
+The renderer approximates geometry through camera-dependent LOD and deferred solid previews, including for secondary rays. Frozen accumulation converges to that resident approximation, not necessarily the fully refined terrain. Traversal-budget failures can darken an image; the transport equations do not remove that geometric/traversal approximation. Floating-point backend differences can affect results. GPU diagnostics are correctness checks, not a cross-backend image-equivalence or performance benchmark. Collision detection is not implemented.
 
 ## Handling traversal limits
 
@@ -116,6 +126,12 @@ While a sample is pending, presentation can retain the last completed estimate o
 3. **Evaluate LOD accuracy.** Compare coarse traversal against full-detail geometry, especially for shadow and indirect paths. Measure the cost of retaining finer detail for secondary rays.
 4. **Validate and optimize traversal.** Compare traversal with a simple oracle at grazing angles, corners, and beam boundaries. Profile memory locality and compaction before changing algorithms.
 5. **Extend transport deliberately.** Consider environment importance sampling, more material models, shading-normal corrections, adaptive sampling, and denoising with variance tracking. Keep analytic and enclosed-scene regression tests for every estimator change.
+
+## Evaluating future eviction
+
+A candidate policy is budget-triggered approximate LRU over subtrees: retain detail while there is space, then reclaim the least recently traversed eligible regions. Track actual traversal use, including empty-space traversal, rather than split-request recency; already-refined regions no longer generate split requests. Preserve required ancestors, add a grace period to avoid repeated eviction and regeneration, and keep eviction disabled during accumulation. A per-frame touched flag can avoid maintaining a strict ordered LRU list on the GPU. This is a proposed policy, not implemented behavior.
+
+Usage tracking and synchronization are established requirements for GPU residency management; the subtree selection policy would still need renderer-specific measurements. [Microsoft residency sample](https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Samples/Desktop/D3D12Residency/readme.md)
 
 ## Evaluating MCMC sampling
 

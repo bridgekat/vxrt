@@ -5,7 +5,12 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use vxrt::{config::Config, renderer::Renderer};
+use vxrt::{
+    config::Config,
+    core::tree::TreeStats,
+    renderer::Renderer,
+    stats_overlay::{OverlayStats, StatsOverlay},
+};
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, ElementState, WindowEvent},
@@ -37,6 +42,11 @@ struct State {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
+    overlay: StatsOverlay,
+    egui_input: egui_winit::State,
+    tree_stats: TreeStats,
+    stats_time: Instant,
+    fps: f32,
     position: Vector3<f32>,
     velocity: Vector3<f32>,
     rotation: [f32; 2],
@@ -94,12 +104,27 @@ impl State {
             view_format,
         ))?;
         surface.configure(&renderer.device, &surface_config);
+        let overlay = StatsOverlay::new(&renderer.device, view_format);
+        let egui_input = egui_winit::State::new(
+            overlay.context.clone(),
+            egui::ViewportId::ROOT,
+            window.as_ref(),
+            Some(window.scale_factor() as f32),
+            None,
+            None,
+        );
+        let tree_stats = renderer.tree_stats();
         let world = (1u32 << config.world_levels) as f32;
         let mut state = Self {
             window,
             surface,
             surface_config,
             renderer,
+            overlay,
+            egui_input,
+            tree_stats,
+            stats_time: Instant::now(),
+            fps: 0.,
             position: Vector3::new(world * 0.5, world + 2.0, world * 0.5),
             velocity: Vector3::new(0.0, 0.0, 0.0),
             rotation: [0.0; 2],
@@ -189,10 +214,35 @@ impl State {
             self.keys.contains(&KeyCode::KeyM),
             self.renderer.samples,
             Some(&view),
+        )?;
+        if self.stats_time.elapsed() >= Duration::from_millis(250) {
+            self.tree_stats = self.renderer.tree_stats();
+            self.stats_time = Instant::now();
+        }
+        let stats = OverlayStats {
+            tree: self.tree_stats,
+            streaming: self.renderer.streaming_stats(),
+            path_tracing: self.path,
+            samples: self.renderer.samples,
+            fps: self.fps,
+            position: position.into(),
+            feedback_pending: self.renderer.feedback_pending(),
+        };
+        let input = self.egui_input.take_egui_input(&self.window);
+        let output = self.overlay.draw(
+            &self.renderer,
+            &view,
+            input,
+            [self.surface_config.width, self.surface_config.height],
+            &stats,
         );
+        if !self.locked {
+            self.egui_input.handle_platform_output(&self.window, output);
+        }
         texture.present();
         self.frames += 1;
         if self.title_time.elapsed() >= Duration::from_secs(1) {
+            self.fps = self.frames as f32 / self.title_time.elapsed().as_secs_f32();
             let stats = if self.path {
                 format!("{} spp", self.renderer.samples)
             } else {
@@ -228,6 +278,7 @@ impl ApplicationHandler for App {
         let Some(s) = &mut self.state else {
             return;
         };
+        let _ = s.egui_input.on_window_event(&s.window, &event);
         let result: Result<()> = (|| {
             match event {
                 WindowEvent::CloseRequested => event_loop.exit(),
@@ -268,7 +319,7 @@ impl ApplicationHandler for App {
                                 KeyCode::KeyC => {
                                     let (allocated, reachable) =
                                         s.renderer.check_tree().context("octree check")?;
-                                    tracing::info!(allocated, reachable, "octree checked");
+                                    tracing::info!(allocated, reachable, stats=?s.renderer.tree_stats(), streaming=?s.renderer.streaming_stats(), "octree checked");
                                 }
                                 KeyCode::KeyG => s.renderer.compact_tree()?,
                                 KeyCode::KeyO => {

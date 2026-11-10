@@ -1,7 +1,7 @@
-use vxrt::world::*;
+use vxrt::core::{packed::generate_terrain, terrain::height};
 #[test]
 fn tree_matches_height_field() {
-    let tree = generate(8, 256);
+    let tree = generate_terrain(8, 256);
     assert_eq!(tree[0] as usize, tree.len() - 1);
     assert!(tree.len() > 10, "exercise branches, not just a solid root");
     for x in (0..256).step_by(17) {
@@ -28,8 +28,8 @@ fn tree_matches_height_field() {
 #[test]
 fn height_cutoff_applies_at_voxel_resolution() {
     for max_height in [0, 1, 3, 7, 8] {
-        let tree = generate(3, max_height);
-        vxrt::octree::validate(&tree, 3).unwrap();
+        let tree = generate_terrain(3, max_height);
+        vxrt::core::packed::validate(&tree, 3).unwrap();
         for x in 0..8 {
             for y in 0..8 {
                 for z in 0..8 {

@@ -9,29 +9,29 @@ struct Params {
     beam: vec4<u32>,
     // previous index/size, current index/size
     scene: vec4<u32>,
-    // world levels, march budget, reserved
+    // world levels, march budget, root descriptor, reserved
     lighting: vec4<f32>,
     // LOD quality, sky intensity, sun intensity, reserved
     sampling: vec4<u32>,
     // sample index, seed, accumulated count, coherent bounce samples
 }
 
-struct Tree {
-    count: u32,
-    data: array<u32>
-}
-
 @group(0) @binding(0)
 var<uniform> p: Params;
 
 @group(0) @binding(1)
-var<storage, read> tree: Tree;
+var<storage, read> branches: array<u32>;
 
 @group(0) @binding(2)
 var<storage, read_write> frame: array<vec4<f32>>;
 
 @group(0) @binding(3)
 var<storage, read_write> beams: array<f32>;
+
+@group(0) @binding(4)
+var<storage, read> leaves: array<vec4<u32>>;
+@group(0) @binding(5)
+var<storage, read_write> requests: array<atomic<u32>>;
 
 const ALBEDO = 0.8;
 
@@ -137,7 +137,7 @@ fn cast_ray(reference: vec3<f32>, direction: vec3<f32>) -> f32 {
     }
     var data: u32;
     if stp == 0u {
-        data = tree.data[0u];
+        data = p.scene.z;
     }
     else {
         stp--;
@@ -154,13 +154,13 @@ fn cast_ray(reference: vec3<f32>, direction: vec3<f32>) -> f32 {
             data = bitcast<u32>(stack[stp].w);
         }
         let pos = vec3<u32>(test_point);
-        while (data & 3u) != 3u {
+        while data != 2u && (data & 3u) != 3u {
             if stp >= 20u {
                 return 1.0;
             }
             stack[stp] = vec4<f32>(box.xyz, bitcast<f32>(data));
             stp++;
-            var datap = data >> 2u;
+            var datap = (data >> 2u) * 8u;
             let mid = box.xyz + box.w / 2.0;
             if test_point.x >= mid.x {
                 datap += 1u;
@@ -175,13 +175,21 @@ fn cast_ray(reference: vec3<f32>, direction: vec3<f32>) -> f32 {
                 box.z = mid.z;
             }
             box.w /= 2.0;
-            data = tree.data[datap];
+            data = branches[datap];
             if (data & 3u) != 3u && !lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
                 // Treat an LOD stop as a solid leaf.
-                data = 7u;
+                data = 2u;
             }
         }
-        if (data >> 2u) != 0u {
+        var occupied = true;
+        if data != 2u {
+            let leaf = leaves[data >> 2u];
+            occupied = leaf.x != 0u;
+            if leaf.y != 0u && p.frame.z == 0u && lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
+                atomicOr(&requests[data >> 2u], 1u);
+            }
+        }
+        if occupied {
             return f32(i) / f32(p.scene.y);
         }
         let hit = inner_intersect(reference, dir, box);

@@ -17,6 +17,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 winit = "0.30"
 wgpu = "29.0.1"
+egui = "0.34"
+egui-winit = "0.34"
+egui-wgpu = "0.34"
 
 [dev-dependencies]
 naga = { version = "29.0.1", features = ["wgsl-in"] }

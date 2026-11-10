@@ -3,6 +3,14 @@ use vxrt::config::*;
 fn rejects_invalid_shader_parameters() {
     for config in [
         Config {
+            splits_per_frame: 0,
+            ..Default::default()
+        },
+        Config {
+            splits_per_frame: 4097,
+            ..Default::default()
+        },
+        Config {
             march_budget: 0,
             ..Default::default()
         },
@@ -34,6 +42,11 @@ fn rejects_invalid_shader_parameters() {
         assert!(config.validate().is_err());
     }
     Config::default().validate().unwrap();
+    for splits in [1, 1024, 4096] {
+        let config: Config = toml::from_str(&format!("splits_per_frame = {splits}")).unwrap();
+        assert_eq!(config.splits_per_frame, splits);
+        config.validate().unwrap();
+    }
     for march_budget in [1, 1024, 65536] {
         let config: Config = toml::from_str(&format!("march_budget = {march_budget}")).unwrap();
         assert_eq!(config.march_budget, march_budget);

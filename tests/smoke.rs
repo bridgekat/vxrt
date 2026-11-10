@@ -62,12 +62,12 @@ async fn run() -> Result<()> {
         );
         let (allocated, reachable) = r.check_tree()?;
         ensure!(allocated >= reachable as u32, "bad tree count");
-        // Verify compaction preserves the rendered geometry.
-        r.compact_tree()?;
+        // Explicit diagnostics must not change the rendered geometry.
+        r.check_tree()?;
         r.render(position, rotation, false, false, 0, None)?;
         ensure!(
             r.read_frame()? == pixels,
-            "compaction changed static rendering"
+            "tree check changed static rendering"
         );
         r.render(position, rotation, true, false, 0, None)?;
         let a = r.read_frame()?;
@@ -205,7 +205,7 @@ async fn run() -> Result<()> {
         }
     }
     println!(
-        "GPU smoke passed: streaming, pool growth, scatter uploads, frozen accumulation, resize, compaction, and march budget. Images: target/smoke/"
+        "GPU smoke passed: streaming, pool growth, scatter uploads, frozen accumulation, resize, compactness checks, and march budget. Images: target/smoke/"
     );
     Ok(())
 }

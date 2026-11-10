@@ -22,31 +22,44 @@ fn rejects_malformed_trees() {
 }
 
 #[test]
-fn import_discards_unreachable_storage_and_runtime_merge_compacts_leaves() {
+fn import_discards_unreachable_storage_and_merges_locally() {
     let mut words = vec![10, 5];
     words.extend([7; 8]);
     words.push(3);
     assert_eq!(validate(&words, 1).unwrap(), 9);
-    let mut tree = Tree::from_packed(&words, 1, 1024).unwrap();
-    assert_eq!(tree.counts(), [1, 8]);
-    tree.compact();
+    let tree = Tree::from_packed(&words, 1, 1024).unwrap();
     assert_eq!(tree.counts(), [0, 1]);
     assert_eq!(tree.stats().solid_leaves, 1);
     tree.validate().unwrap();
-    let stats = tree.stats();
-    tree.compact();
-    assert_eq!(tree.stats(), stats);
 }
 #[test]
 fn runtime_merge_preserves_mixed_children() {
     let words = [10, 5, 3, 7, 3, 7, 7, 3, 7, 3, 7];
-    let mut tree = Tree::from_packed(&words, 1, 1024).unwrap();
+    let tree = Tree::from_packed(&words, 1, 1024).unwrap();
     let root = tree.root();
-    let children = tree.branch_words(root >> 2);
-    tree.compact();
-    assert_eq!(tree.root(), root);
-    assert_eq!(tree.branch_words(root >> 2), children);
+    let children = tree.branch_words(root >> 4);
+    assert_eq!(
+        children.map(|word| (word >> 2) & 1),
+        [0, 1, 0, 1, 1, 0, 1, 0]
+    );
     assert_eq!(tree.stats().empty_leaves, 4);
     assert_eq!(tree.stats().solid_leaves, 4);
     tree.validate().unwrap();
+}
+
+#[test]
+fn import_merges_multiple_levels_without_merging_mixed_ancestors() {
+    let mut words = vec![73, 5];
+    words.extend((0..8).map(|i| ((9 + i * 8) << 2) | 1));
+    words.extend([7; 64]);
+    let uniform = Tree::from_packed(&words, 2, 1024).unwrap();
+    assert_eq!(uniform.counts(), [0, 1]);
+    assert_eq!(uniform.validate().unwrap(), 1);
+
+    words[10] = 3;
+    let mixed = Tree::from_packed(&words, 2, 1024).unwrap();
+    assert_eq!(mixed.counts(), [2, 15]);
+    assert_eq!(mixed.stats().empty_leaves, 1);
+    assert_eq!(mixed.stats().solid_leaves, 14);
+    assert_eq!(mixed.validate().unwrap(), 17);
 }

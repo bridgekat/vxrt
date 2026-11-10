@@ -321,7 +321,6 @@ impl ApplicationHandler for App {
                                         s.renderer.check_tree().context("octree check")?;
                                     tracing::info!(allocated, reachable, stats=?s.renderer.tree_stats(), streaming=?s.renderer.streaming_stats(), "octree checked");
                                 }
-                                KeyCode::KeyG => s.renderer.compact_tree()?,
                                 KeyCode::KeyO => {
                                     std::fs::create_dir_all("screenshots")?;
                                     let name = format!(

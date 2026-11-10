@@ -33,7 +33,7 @@ For a cubic region with vertical interval `[y, y + size)` and height bounds `[mi
 
 A mixed region is represented by a deferred leaf with solid occupancy. Splitting classifies its eight child regions independently. Child index bits 0, 1, and 2 select the upper half of X, Y, and Z respectively.
 
-Eight children can merge only when they are all exact leaves with equal occupancy. Deferred solid previews are not compatible with exact solid leaves or with one another for merging: their apparent solidity is an approximation. `node::merge` owns this local rule; `Tree::compact` applies it bottom-up and frees redundant descendants. Future material fields must participate in compatibility before richer leaves can merge safely.
+Eight children can merge only when they are all exact leaves with equal occupancy. Deferred solid previews are not compatible with exact solid leaves or with one another for merging: their apparent solidity is an approximation. `node::merge` owns this local rule; Tree updates apply it locally, then iterate upward through parent links while each merge succeeds. Each check examines only eight direct children; a failed merge stops propagation. Future material fields must participate in compatibility before richer leaves can merge safely.
 
 ## Runtime representation and allocation
 
@@ -62,9 +62,9 @@ A split first checks that one branch and eight leaves can be allocated. If capac
 2. Replaces the old leaf reference in its parent, or replaces the root.
 3. Frees the old leaf and marks all changed live records dirty.
 
-A merge frees the redundant subtree, allocates the replacement exact leaf, and updates its parent or the root. Freed GPU records need not be cleared because the uploaded topology no longer references them. Dirty sets deduplicate records and upload only their final live contents; a freed slot that is reused before synchronization produces one patch for its new allocation.
+A merge frees one branch and its eight compatible leaf children, allocates the replacement exact leaf, and updates its parent or the root. Freed GPU records need not be cleared because the uploaded topology no longer references them. Dirty sets deduplicate records and upload only their final live contents; a freed slot that is reused before synchronization produces one patch for its new allocation.
 
-Automatic compaction runs after a batch with successful splits, avoiding a whole-tree merge scan on idle frames. The G control also requests compaction in interactive mode. Path tracing pauses both operations.
+There is no global compaction pass or manual compaction command. Refinement checks only its changed branch and, if merged, its ancestors. Exact height bounds normally make a split of a mixed region immediately nonmergeable. Packed imports normalize each branch as its children finish construction, without a second traversal. Path tracing pauses topology changes.
 
 ## GPU-visible state and delayed feedback
 
@@ -89,7 +89,7 @@ Scene replacement discards outstanding feedback. During accumulation, completed 
 
 The renderer uses this order:
 
-1. Poll for a completed feedback batch without blocking. If interactive, process requests up to `splits_per_frame` successful splits and compact when needed.
+1. Poll for a completed feedback batch without blocking. If interactive, process requests up to `splits_per_frame` successful splits with local merge propagation.
 2. Record GPU pool growth copies, then scatter patches for dirty branch and leaf slots. Rebuild bindings when buffers change.
 3. Provide the current root and frame parameters. Enable request collection only if interactive and no readback is outstanding.
 4. Run traversal: interactive beam pass followed by full-resolution rays, or the path-tracing pass. Collecting invocations initialize and write their own request slots.
@@ -137,7 +137,7 @@ The overlay separates resident state, sampled every 250 ms, from activity measur
 
 An idle view can retain many deferred leaves outside its required LOD. Zero requests is not proof of complete traversal when rays can exhaust their march budget. GPU pool byte counts exclude request/readback buffers, staging, framebuffers, and CPU metadata.
 
-`Tree::validate` checks reachable allocations, unique references, parent links, regions, and valid leaf data. The C control also compares every allocated GPU slot against its CPU record. Integration tests cover terrain bounds, local compatibility, allocation reuse, delayed-feedback invalidation, topology, and imports. GPU smoke tests exercise growth and scatter writes, frozen accumulation, residency retention, per-frame accounting, distant-view refinement, and fixed-view convergence against exact reference terrain. Request tests compare hierarchical output against a CPU stream filter, including empty input, duplicates, rotation, truncation, partial groups, and 2D dispatch. A small-packet rendering test exercises overflow and CPU deduplication.
+`Tree::validate` checks reachable allocations, unique references, parent links, regions, valid leaf data, and compactness: no branch may retain eight compatible exact leaves. The C control runs this explicit full-tree diagnostic without modifying the tree. Periodic statistics scans remain separate and run every 250 ms. The C control also compares every allocated GPU slot against its CPU record. Integration tests cover terrain bounds, local compatibility, allocation reuse, delayed-feedback invalidation, topology, and imports. GPU smoke tests exercise growth and scatter writes, frozen accumulation, residency retention, per-frame accounting, distant-view refinement, and fixed-view convergence against exact reference terrain. Request tests compare hierarchical output against a CPU stream filter, including empty input, duplicates, rotation, truncation, partial groups, and 2D dispatch. A small-packet rendering test exercises overflow and CPU deduplication.
 
 ## Packed scenes and scope
 
@@ -145,4 +145,4 @@ An idle view can retain many deferred leaves outside its required LOD. Zero requ
 
 The current design supports a height-field terrain source and exact binary occupancy. It does not implement terrain editing, worker-thread generation, eviction, richer material compatibility, or background refinement during accumulation. Path tracing converges to the frozen resident and LOD approximation, not necessarily the fully refined terrain. See [ray casting](raycast.md) for traversal and profiling, and [sampling](sampling.md) for lighting and accumulation.
 
-Useful optimization experiments include ancestor-only merging after splits, worker generation if CPU profiling supports it, coalesced range uploads versus scatter writes at different dirty densities, and upload-staging reuse. Measure active loading separately from steady state. Pool locality after allocation/reuse may affect traversal, but relocation would require reference updates and preservation of the feedback snapshot invariant.
+Useful optimization experiments include worker generation if CPU profiling supports it, coalesced range uploads versus scatter writes at different dirty densities, and upload-staging reuse. Measure active loading separately from steady state. Pool locality after allocation/reuse may affect traversal, but relocation would require reference updates and preservation of the feedback snapshot invariant.

@@ -240,27 +240,32 @@ impl Tree {
         self.dirty_branches.insert(branch.index);
         self.replace(parent, Node::Branch(branch));
         self.leaves.remove(request);
+        self.merge_upwards(branch);
         Refinement::Split
     }
-    fn release(&mut self, node: Node) {
-        match node {
-            Node::Leaf(h) => {
-                self.leaves.remove(h);
-            }
-            Node::Branch(h) => {
-                let b = self.branches.remove(h).unwrap();
-                for c in b.children {
-                    self.release(c);
-                }
-            }
+    /// Inspect only the eight direct children, never descend into other branches.
+    fn merge_material(&self, h: Handle) -> Option<Leaf> {
+        let children = self.branches.get(h)?.children;
+        let mut materials = [Leaf::EMPTY; 8];
+        for (i, child) in children.into_iter().enumerate() {
+            let Node::Leaf(leaf) = child else { return None };
+            materials[i] = self.leaves.get(leaf)?.material;
         }
+        node::merge(materials)
     }
-    fn collapse(&mut self, h: Handle, material: Leaf) {
-        let b = self.branches.get(h).unwrap();
+    fn merge_branch(&mut self, h: Handle) -> Option<Node> {
+        let material = self.merge_material(h)?;
+        let b = self.branches.remove(h).unwrap();
         let parent = b.parent;
         let region = b.region;
-        // Free descendants before allocating the replacement: no growth is needed.
-        self.release(Node::Branch(h));
+        // Compatibility guarantees eight leaves. Free them before allocating
+        // the replacement so merging never grows a pool.
+        for child in b.children {
+            let Node::Leaf(leaf) = child else {
+                unreachable!()
+            };
+            self.leaves.remove(leaf);
+        }
         let leaf = self
             .leaves
             .allocate(LeafEntry {
@@ -270,27 +275,22 @@ impl Tree {
             })
             .unwrap();
         self.dirty_leaves.insert(leaf.index);
-        self.replace(parent, Node::Leaf(leaf));
+        let node = Node::Leaf(leaf);
+        self.replace(parent, node);
+        Some(node)
     }
-    pub fn compact(&mut self) {
-        fn visit(tree: &mut Tree, node: Node) {
-            let Node::Branch(h) = node else { return };
-            let children = tree.branches.get(h).unwrap().children;
-            for c in children {
-                visit(tree, c);
+    /// A failed merge cannot change its ancestors, so stop immediately.
+    fn merge_upwards(&mut self, mut branch: Handle) {
+        loop {
+            let parent = self.branches.get(branch).unwrap().parent;
+            if self.merge_branch(branch).is_none() {
+                break;
             }
-            let children = tree.branches.get(h).unwrap().children;
-            let mut materials = [Leaf::EMPTY; 8];
-            for (i, c) in children.into_iter().enumerate() {
-                let Node::Leaf(l) = c else { return };
-                materials[i] = tree.leaves.get(l).unwrap().material;
-            }
-            if let Some(material) = node::merge(materials) {
-                tree.collapse(h, material);
-            }
+            let Some(parent) = parent else { break };
+            branch = parent.branch;
         }
-        visit(self, self.root);
     }
+    /// Explicit full-tree diagnostic, including the absence of mergeable branches.
     pub fn validate(&self) -> Result<usize> {
         let mut todo = vec![(self.root, None)];
         let mut seen = HashSet::new();
@@ -314,6 +314,11 @@ impl Tree {
                         .get(h)
                         .ok_or_else(|| anyhow::anyhow!("stale branch"))?;
                     ensure!(b.region.size > 1, "branch below voxel size");
+                    ensure!(
+                        self.merge_material(h).is_none(),
+                        "noncompact tree: branch {} has compatible leaf children",
+                        h.index
+                    );
                     for (i, c) in b.children.iter().enumerate() {
                         todo.push((*c, Some((h, i, b.region.child(i)))));
                     }
@@ -394,7 +399,9 @@ impl Tree {
                 }
                 tree.branches.get_mut(h).unwrap().children = children;
                 tree.dirty_branches.insert(h.index);
-                Ok(Node::Branch(h))
+                // Children have already been normalized bottom-up during import.
+                // Do not walk into an ancestor while it is still being built.
+                Ok(tree.merge_branch(h).unwrap_or(Node::Branch(h)))
             }
         }
         tree.root = build(

@@ -14,7 +14,7 @@ Shaders are embedded in the executable. Configuration and screenshot paths are r
 
 ## Rendering modes
 
-Interactive mode renders a fresh frame every time. Press **P** to freeze the camera and resident tree and accumulate path-tracing samples in linear light; press P again to return to interactive rendering. Accumulation resets when switching modes, changing the camera or render resolution, or compacting the octree.
+Interactive mode renders a fresh frame every time. Press **P** to freeze the camera and resident tree and accumulate path-tracing samples in linear light; press P again to return to interactive rendering. Accumulation resets when switching modes, changing the camera or render resolution, or replacing the scene.
 
 A height map and min/max pyramid are baked on the CPU at startup. Interactive rays request octree refinement; the CPU splits nodes, merges compatible leaves, and retains generated detail. Missing detail appears as coarse solid geometry. Path tracing pauses loading and merging so accumulation uses a stable tree; explore the scene before pressing P. Geometry uses plain white surfaces without a grid overlay. Interactive rendering uses directional shading; surfaces have constant neutral albedo 0.8, with colored sky and sun illumination in path tracing.
 
@@ -30,8 +30,7 @@ Path tracing uses cosine-weighted Lambertian bounces, sun next-event estimation 
 | P | Toggle accumulating path tracing |
 | L | Toggle mouse capture |
 | M (hold) | Show per-pixel traversal cost in interactive mode |
-| C | Validate the CPU tree and compare its resident slots with synchronous GPU readback |
-| G | Merge compatible leaves on the CPU in interactive mode |
+| C | Check tree topology and compactness, then compare resident slots with GPU readback |
 | O | Save a gamma-encoded PNG in `screenshots/` |
 | Escape | Quit |
 
@@ -78,7 +77,7 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --release --locked --test smoke -- --ignored --nocapture
 ```
 
-Integration tests check height bounds and occupancy, local merge compatibility, pool growth and delayed-feedback invalidation, tree refinement and residency retention, packed-tree imports, configuration validation, and WGSL shader validity. GPU smoke tests are ignored by default, require a graphics adapter, and run without a window. They execute compute and presentation passes, check sampler distributions and analytic lighting integrals, test closed/open-room visibility, exercise both spatial sampling modes, and verify deterministic replay, accumulation, frozen geometry, compaction, and reset behavior. Streaming checks exercise GPU split feedback, scattered uploads, pool growth, residency retention after camera movement, and the egui stats overlay. Fixed-view checks verify that requests and uploads settle to zero, including from the elevated starting position, and compare settled views against exact generated terrain. Preview PNGs are written to `target/smoke/`.
+Integration tests check height bounds and occupancy, local merge compatibility, pool growth and delayed-feedback invalidation, tree refinement and residency retention, packed-tree imports, configuration validation, and WGSL shader validity. GPU smoke tests are ignored by default, require a graphics adapter, and run without a window. They execute compute and presentation passes, check sampler distributions and analytic lighting integrals, test closed/open-room visibility, exercise both spatial sampling modes, and verify deterministic replay, accumulation, frozen geometry, compactness checks, and reset behavior. Streaming checks exercise GPU split feedback, scattered uploads, pool growth, residency retention after camera movement, and the egui stats overlay. Fixed-view checks verify that requests and uploads settle to zero, including from the elevated starting position, and compare settled views against exact generated terrain. Preview PNGs are written to `target/smoke/`.
 
 To isolate sun illumination, set `sky_intensity = 0.0` in `config.toml` and enter path-tracing mode. The defaults are `sky_intensity = 1.0` and `sun_intensity = 256.0`, making sunlight apparent despite the sun disk's small angular size. Adjusting these intensities does not change the sun's angular size or sampling PDFs.
 

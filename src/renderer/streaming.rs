@@ -158,9 +158,6 @@ impl Streaming {
             self.readback_spare = Some(feedback.buffer);
             self.tree.finish_feedback();
         }
-        if self.stats.split > 0 {
-            self.tree.compact();
-        }
         Ok(())
     }
     /// Apply unique slot patches before traversal. Growth copies the old GPU allocation.

@@ -4,7 +4,7 @@ Sampling and transport are implemented in `shaders/sampling.wgsl` and `shaders/m
 
 ## Path tracing
 
-Path tracing freezes the camera and pauses CPU splits and merging, including the G control. GPU rays do not request refinement while accumulating. Completed feedback can be discarded without applying it. The resident SVO and camera-dependent LOD remain stable; missing detail is rendered as coarse solid geometry even for shadow and continuation rays. Returning to interactive mode resumes streaming.
+Path tracing freezes the camera and pauses CPU splits and local merging. GPU rays do not request refinement while accumulating. Completed feedback can be discarded without applying it. The resident SVO and camera-dependent LOD remain stable; missing detail is rendered as coarse solid geometry even for shadow and continuation rays. Returning to interactive mode resumes streaming.
 
 Path rays trace from the camera without beam skipping. Camera jitter samples uniformly within each pixel's footprint. Transport uses normalized geometric voxel-face normals and a neutral Lambertian BRDF `0.8 / pi` (constant RGB albedo 0.8).
 
@@ -39,7 +39,7 @@ Set `coherent_sampling = false` to key bounce dimensions by pixel as well. This 
 
 ## Accumulation and presentation
 
-Path samples are averaged in linear light. Mode switches, camera changes, render-resolution changes, and tree replacement or compaction reset accumulation. At `2^24` accumulated samples, the running average restarts to keep its count exactly representable in shader floating-point arithmetic.
+Path samples are averaged in linear light. Mode switches, camera changes, render-resolution changes, and tree replacement reset accumulation. At `2^24` accumulated samples, the running average restarts to keep its count exactly representable in shader floating-point arithmetic.
 
 Color and beam data reside in storage buffers. The presentation shader bilinearly samples the color buffer and applies gamma 2.2 encoding through a non-sRGB target view. Screenshot export uses the same gamma curve. Display/export clamps out-of-range values; transport tests check that linear radiance is finite and nonnegative before display conversion.
 

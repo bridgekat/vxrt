@@ -429,13 +429,6 @@ impl Renderer {
         self.streaming.verify(&branches, &leaves)?;
         Ok((reachable as u32, reachable))
     }
-    pub fn compact_tree(&mut self) -> Result<()> {
-        if !self.last_path {
-            self.streaming.tree.compact();
-            self.samples = 0;
-        }
-        Ok(())
-    }
     /// Replace the procedural scene with an exact packed tree (streaming disabled).
     pub fn replace_packed_scene(&mut self, words: &[u32]) -> Result<()> {
         let tree = Tree::from_packed(words, self.config.world_levels, self.streaming.limit)?;

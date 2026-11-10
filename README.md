@@ -1,6 +1,6 @@
 # Voxel Raycasting Test
 
-A Rust voxel ray-casting and path-tracing renderer built around sparse voxel octrees. Licensed under WTFPLv2.
+A Rust voxel ray-casting and path-tracing renderer built around sparse voxel octrees, with the design philosophy that spatially localized operations should be done locally. Licensed under WTFPLv2.
 
 ## Build and run
 
@@ -16,7 +16,7 @@ Shaders are embedded in the executable. Configuration and screenshot paths are r
 
 Interactive mode renders a fresh frame every time. Press **P** to freeze the camera and resident tree and accumulate path-tracing samples in linear light; press P again to return to interactive rendering. Accumulation resets when switching modes, changing the camera or render resolution, or replacing the scene.
 
-A height map and min/max pyramid are baked on the CPU at startup. Interactive rays request octree refinement; the CPU splits nodes, merges compatible leaves, and retains generated detail. Missing detail appears as coarse solid geometry. Path tracing pauses loading and merging so accumulation uses a stable tree; explore the scene before pressing P. Geometry uses plain white surfaces without a grid overlay. Interactive rendering uses directional shading; surfaces have constant neutral albedo 0.8, with colored sky and sun illumination in path tracing.
+A height map and min/max pyramid are baked on the CPU at startup. Interactive rays request octree refinement; the CPU splits nodes, merges compatible leaves, and unloads distant detail within a bounded CPU budget. Missing detail appears as coarse solid geometry. Path tracing pauses loading and merging so accumulation uses a stable tree; explore the scene before pressing P. Geometry uses plain white surfaces without a grid overlay. Interactive rendering uses directional shading; surfaces have constant neutral albedo 0.8, with colored sky and sun illumination in path tracing.
 
 Path tracing uses cosine-weighted Lambertian bounces, sun next-event estimation with multiple importance sampling, and Russian roulette. Bounce samples are spatially shared by default to encourage coherent rays; camera jitter is per-pixel. Set `coherent_sampling = false` to try per-pixel bounce samples and compare the noise/performance tradeoff.
 
@@ -36,7 +36,7 @@ Path tracing uses cosine-weighted Lambertian bounces, sun next-event estimation 
 
 An egui overlay shows branch/data pool usage and capacity, free slots, exact empty/solid leaves, deferred solid previews, GPU pool storage, baked height-bound storage, and feedback status. Per-frame counters show unique GPU refinement requests received and logical nodes updated, along with successful splits and requests held back by the split budget or pool capacity. Feedback is asynchronous, so the overlay identifies its source frame and distinguishes an empty batch from no batch received. Tree counts update every frame from incrementally maintained counters, without tree scans or GPU readback. Press C for validated tree statistics in the log. Screenshots saved with O contain the scene without the overlay.
 
-Refinement follows screen-space LOD requests without a distance cutoff. Generated detail stays resident regardless of camera distance; there is no eviction policy. Every branch stores a consistent summary of its children. Exact compatible-child merging frees redundant slots; LOD stops and explicit derefinement use the same stored summary.
+Refinement follows screen-space LOD requests without a distance cutoff. A bounded rolling CPU sweep unloads detail beyond the radial LOD retention range. Nearby off-screen detail stays resident, independently of camera orientation; set `max_unload_checks = 0` to disable unloading. Every branch stores a consistent summary of its children. Exact compatible-child merging frees redundant slots; LOD stops and explicit derefinement use the same stored summary.
 
 Movement is always free flight. There is no gravity or collision detection.
 
@@ -52,6 +52,8 @@ cargo run --locked -- --print-config > config.toml
 | --- | --- | --- |
 | `world_levels` | `10` | World side length is `2^world_levels` voxels; allowed range 1–12 (up to 4096) |
 | `splits_per_frame` | `1024` | Maximum successful CPU splits per frame receiving feedback; allowed range 1–4096. Each split updates several node records |
+| `max_unload_checks` | `16384` | Maximum branch slots examined for unloading per interactive frame; 0 disables, maximum 65536 |
+| `unloads_per_frame` | `8192` | Maximum logical nodes removed per interactive frame; 0 disables, maximum 65536. Each eligible subtree unload removes eight children |
 | `max_split_requests` | `16384` | Maximum raw request entries per readback packet, including duplicates; allowed range 1–1048576. CPU deduplicates before splitting |
 | `max_height` | `256` | Exclusive voxel-height cutoff; voxels at or above it are empty |
 | `lod_quality` | `1.0` | Positive detail-quality factor; larger values retain finer detail |
@@ -77,7 +79,7 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --release --locked --lib --test smoke -- --ignored --nocapture
 ```
 
-Integration tests check height bounds and occupancy, local merge compatibility, pool growth and delayed-feedback invalidation, tree refinement and residency retention, packed-tree imports, configuration validation, and WGSL shader validity. GPU smoke tests are ignored by default, require a graphics adapter, and run without a window. They execute compute and presentation passes, check sampler distributions and analytic lighting integrals, test closed/open-room visibility, exercise both spatial sampling modes, and verify deterministic replay, accumulation, frozen geometry, compactness checks, and reset behavior. Streaming checks exercise GPU split feedback, scattered uploads, pool growth, residency retention after camera movement, and the egui stats overlay. Fixed-view checks verify that requests and uploads settle to zero, including from the elevated starting position, and compare settled views against exact generated terrain. Preview PNGs are written to `target/smoke/`.
+Integration tests check height bounds and occupancy, local merge compatibility, pool growth and delayed-feedback invalidation, tree refinement and residency retention, packed-tree imports, configuration validation, and WGSL shader validity. GPU smoke tests are ignored by default, require a graphics adapter, and run without a window. They execute compute and presentation passes, check sampler distributions and analytic lighting integrals, test closed/open-room visibility, exercise both spatial sampling modes, and verify deterministic replay, accumulation, frozen geometry, compactness checks, and reset behavior. Streaming checks exercise GPU split feedback, scattered uploads, pool growth, bounded unloading after moving away and reloading on return, and the egui stats overlay. Fixed-view checks verify that requests and uploads settle to zero, including from the elevated starting position, and compare settled views against exact generated terrain. Preview PNGs are written to `target/smoke/`.
 
 To isolate sun illumination, set `sky_intensity = 0.0` in `config.toml` and enter path-tracing mode. The defaults are `sky_intensity = 1.0` and `sun_intensity = 256.0`, making sunlight apparent despite the sun disk's small angular size. Adjusting these intensities does not change the sun's angular size or sampling PDFs.
 

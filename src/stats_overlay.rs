@@ -115,14 +115,17 @@ impl StatsOverlay {
                                 activity.pool_limited, activity.stale
                             ));
                             ui.label(if stats.path_tracing {
-                                "Refinement paused"
+                                "Residency updates paused"
                             } else if stats.feedback_pending {
                                 "Feedback pending"
                             } else {
                                 "Feedback ready"
                             });
                             ui.separator();
-                            ui.small("No eviction: generated detail stays resident");
+                            ui.small(format!(
+                                "Unload: {} slots checked | {} nodes",
+                                activity.unload_checked, activity.unloaded
+                            ));
                             ui.small(format!(
                                 "Position: {:.1}, {:.1}, {:.1}",
                                 stats.position[0], stats.position[1], stats.position[2]

@@ -3,6 +3,7 @@
 pub mod node;
 pub mod packed;
 pub mod pool;
+pub mod residency;
 pub mod terrain;
 pub mod tree;
 /// Maximum supported octree depth (world side length is 2^depth).

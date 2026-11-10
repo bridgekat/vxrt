@@ -4,6 +4,7 @@ use crate::{
     config::Config,
     core::{
         pool::Handle,
+        residency::{Lod, Residency},
         terrain::HeightMap,
         tree::{BRANCH_WORDS, Refinement, Tree},
     },
@@ -19,6 +20,9 @@ pub struct StreamingStats {
     pub request_entries: usize,
     pub request_dropped: usize,
     pub split: usize,
+    pub unload_checked: usize,
+    pub derefined: usize,
+    pub unloaded: usize,
     pub uploaded_branches: usize,
     pub uploaded_data: usize,
     pub updated_nodes: usize,
@@ -43,6 +47,7 @@ pub(super) struct Streaming {
     pub gpu: GpuPools,
     pub requests: Requests,
     feedback: Option<Feedback>,
+    residency: Residency,
     readback_spare: Option<wgpu::Buffer>,
     pub limit: usize,
     pub stats: StreamingStats,
@@ -65,6 +70,7 @@ impl Streaming {
             gpu: GpuPools::new(device),
             requests: Requests::new(device, config.max_split_requests),
             feedback: None,
+            residency: Residency::default(),
             readback_spare: None,
             limit,
             stats: StreamingStats::default(),
@@ -134,6 +140,18 @@ impl Streaming {
         }
         Ok(())
     }
+    pub fn unload(&mut self, config: &Config, camera: [f32; 3], height: u32) {
+        let lod = Lod::new(camera, height, config.field_of_view, config.lod_quality);
+        let stats = self.residency.sweep(
+            &mut self.tree,
+            &lod,
+            config.max_unload_checks as usize,
+            config.unloads_per_frame as usize,
+        );
+        self.stats.unload_checked = stats.checked;
+        self.stats.derefined = stats.derefined;
+        self.stats.unloaded = stats.unloaded;
+    }
     /// Upload the final live records before submitting traversal.
     pub fn sync(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) -> bool {
         let uploaded = self.gpu.sync(&mut self.tree, device, encoder);
@@ -178,6 +196,7 @@ impl Streaming {
     }
     pub fn replace(&mut self, tree: Tree) {
         self.tree = tree;
+        self.residency = Residency::default();
         self.feedback = None;
         self.readback_spare = None;
     }

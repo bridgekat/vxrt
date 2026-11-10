@@ -2,12 +2,13 @@
 
 The renderer uses a CPU-owned sparse voxel octree (SVO). GPU rays read its resident representation and mark leaves that need refinement. The CPU generates children from baked terrain bounds, merges compatible leaves, and uploads changed slots. GPU shaders never allocate nodes or modify topology.
 
-Interactive rendering permits refinement. Accumulating path tracing freezes the resident tree and camera; missing detail remains a coarse solid preview in both modes. The tree supports explicit subtree derefinement, but the renderer does not invoke it automatically: generated detail stays resident and there is no eviction policy.
+Interactive rendering permits refinement. Accumulating path tracing freezes the resident tree and camera; missing detail remains a coarse solid preview in both modes. Interactive frames also run a bounded CPU residency sweep, unloading detail that is too distant for the radial LOD policy. Nearby off-screen detail stays resident.
 
 ## Module boundaries
 
 | Module | Responsibility |
 | --- | --- |
+| `src/core/residency.rs` | Radial LOD policy and bounded rolling unload cursor |
 | `src/core/terrain.rs` | Height function and immutable aligned min/max pyramid |
 | `src/core/node.rs` | Spatial regions, occupancy classification, local split and merge rules |
 | `src/core/pool.rs` | Stable slot indices, freelist allocation, doubling growth, feedback invalidation |
@@ -71,7 +72,7 @@ Refinement checks capacity for one child block and eight data slots, then classi
 
 Exact merging retains the node's summary and data slot, detaches its child block, and releases descendants. Packed imports normalize bottom-up during construction. There is no periodic/global compaction pass or manual compaction command.
 
-Derefinement simply drops the selected node's children and frees their allocations. Its already-consistent summary and data-slot identity remain unchanged. No terrain lookup or summary reconstruction is needed, and ancestor summaries and compatibility remain unchanged. A leaf or unavailable data slot is a no-op. Descendant reclamation still costs time proportional to the removed subtree; future eviction scheduling must account for it. Freed GPU slots need not be cleared because the new topology cannot reach them.
+Derefinement simply drops the selected node's children and frees their allocations. Its already-consistent summary and data-slot identity remain unchanged. No terrain lookup or summary reconstruction is needed, and ancestor summaries and compatibility remain unchanged. A leaf or unavailable data slot is a no-op. Descendant reclamation still costs time proportional to the removed subtree; automatic unloading therefore only selects branches with eight leaf children. Freed GPU slots need not be cleared because the new topology cannot reach them.
 
 Imported scenes support derefinement, but cannot regenerate discarded detail because the import source is not retained. Only refinement requires external generation data. Automatic compaction uses exact compatibility; lossy summarization alone must never trigger child removal.
 
@@ -100,7 +101,7 @@ Scene replacement discards outstanding feedback. During accumulation, completed 
 
 The renderer uses this order:
 
-1. Poll for a completed feedback batch without blocking. If interactive, process requests up to `splits_per_frame` successful splits with local merge propagation.
+1. Poll for a completed feedback batch without blocking. If interactive, process requests up to `splits_per_frame` successful splits with local merge propagation, then run the bounded CPU unload sweep.
 2. Record GPU pool growth copies, then scatter patches for dirty branch and data slots. Rebuild bindings when buffers change.
 3. Provide the current root and frame parameters. Enable request collection only if interactive and no readback is outstanding.
 4. Run traversal: interactive beam pass followed by full-resolution rays, or the path-tracing pass. Collecting invocations initialize and write their own request slots.
@@ -134,7 +135,13 @@ The `splits_per_frame` setting in `config.toml` limits successful CPU splits per
 
 Requests beyond the successful-split budget are not kept in a CPU queue; subsequent rays rediscover them. Frames rendered while a feedback batch is pending do not enqueue another batch. Pool-limit failures retain coarse previews. Stable views should eventually reach zero requests and uploads when the required allocations fit, but finite march budgets can prevent rays from reaching all relevant geometry.
 
-No resident node is evicted because it is distant or unused. Memory use can therefore grow as the camera explores. An eventual eviction policy should be driven by a residency budget and protect active ancestors. Approximate least-recent-use could be evaluated, but would need access information from traversal: split-request recency alone cannot identify exact geometry that remains visible. Eviction must remain paused during accumulation.
+### Bounded CPU unloading
+
+`max_unload_checks` (default 16384, range 0–65536; zero disables unloading) limits branch-pool slots examined by a persistent rolling cursor each interactive frame. `unloads_per_frame` (default 8192, range 0–65536) separately caps logical nodes removed. Each successful subtree unload consumes eight units: the eight child data nodes, excluding the retained parent and its separate child-block allocation. The sweep stops when the check limit is reached or fewer than eight unload units remain, without exceeding either limit. Either zero budget disables unloading; values 1–7 for the unload budget cannot fit an operation. Unused budget does not carry over to the next frame. Holes count against the check budget; a frame visits no more than one pool capacity. No full-tree candidate collection or scan occurs. Pool growth and slot reuse need no cursor repair: each visit reads the current allocation. Scene replacement resets the cursor.
+
+The radial policy is specified in [ray casting](raycast.md#shared-lod-and-residency-policy). CPU retention uses 1.5 times the rendering quality, creating a hysteresis band. It ignores orientation, visibility and frustum membership. A branch within this retention range is protected even behind the camera. A distant branch is eligible only when all eight children are leaves: one successful check releases exactly eight data slots and one child block. Parents become eligible on subsequent visits, so large subtrees disappear incrementally without unbounded recursive reclamation in a frame. Each check has at most eight child queries; allocator/dirty-set bookkeeping retains its usual costs.
+
+This is distance-based residency, not LRU or a strict memory budget. Traversal emits no access feedback, and there are no GPU access bits or timestamps. Existing snapshot invalidation protects pending split feedback when descendants are freed or reused. Accumulation skips the sweep entirely; imported scenes are exempt because they cannot regenerate discarded detail. Pool capacities remain allocated for reuse, so unloading reduces live usage rather than returning VRAM. Sparse, previously large pools can take many frames to sweep.
 
 ## Diagnostics and validation
 
@@ -154,6 +161,6 @@ An idle view can retain many deferred leaves outside its required LOD. Zero requ
 
 Packed imports are used by regression tests for independent exact terrain, empty scenes, and enclosed/open-room lighting; the interactive application does not load packed scenes. `core::packed` provides their input/reference encoding: a node-count header followed by tagged words, with branches pointing to eight contiguous packed children and leaves storing occupancy 0 or 1. Import validates the reachable structure and constructs runtime pool records; it does not preserve unreachable storage. `Renderer::replace_packed_scene` replaces the procedural scene, disables its terrain streaming, and resets accumulation. All runtime merging remains in `Tree`.
 
-The current design supports a height-field terrain source and exact binary occupancy. It does not implement terrain editing, worker-thread generation, eviction, richer material compatibility, or background refinement during accumulation. Path tracing converges to the frozen resident and LOD approximation, not necessarily the fully refined terrain. See [ray casting](raycast.md) for traversal and profiling, and [sampling](sampling.md) for lighting and accumulation.
+The current design supports a height-field terrain source and exact binary occupancy. It does not implement terrain editing, worker-thread generation, LRU or memory-budget eviction, richer material compatibility, or background refinement during accumulation. Path tracing converges to the frozen resident and LOD approximation, not necessarily the fully refined terrain. See [ray casting](raycast.md) for traversal and profiling, and [sampling](sampling.md) for lighting and accumulation.
 
 Useful optimization experiments include worker generation if CPU profiling supports it, coalesced range uploads versus scatter writes at different dirty densities, and upload-staging reuse. Measure active loading separately from steady state. Pool locality after allocation/reuse may affect traversal, but relocation would require reference updates and preservation of the feedback snapshot invariant.

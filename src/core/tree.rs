@@ -118,6 +118,11 @@ impl Tree {
             .unwrap();
         tree
     }
+    /// Whether discarded detail can be reconstructed from the terrain source.
+    pub fn can_regenerate(&self) -> bool {
+        self.map.is_some()
+    }
+
     pub fn root_node(&self) -> Node {
         self.root
     }

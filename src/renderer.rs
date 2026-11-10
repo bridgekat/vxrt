@@ -291,6 +291,10 @@ impl Renderer {
         target: Option<&wgpu::TextureView>,
     ) -> Result<()> {
         self.streaming.process(&self.device, &self.config, path)?;
+        if !path {
+            self.streaming
+                .unload(&self.config, position.into(), self.height);
+        }
         let mut encoder = self.device.create_command_encoder(&Default::default());
         if self.streaming.sync(&self.device, &mut encoder) {
             self.groups = Self::groups(

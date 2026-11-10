@@ -18,9 +18,19 @@ Runtime descriptors cache occupancy and mixed status. Every node, including bran
 
 `cast_ray` returns a negative value for a miss, a value in `[0, 1)` for a hit (iterations divided by `march_budget`), and `1` for traversal-budget or stack exhaustion. Callers must distinguish exhaustion from a miss. Interactive profiling visualizes traversal cost. Path tracing contributes no further light for exhaustion; a shadow-ray failure is not treated as visible sky.
 
-LOD is camera-dependent even for secondary rays. The test compares node size with projected pixel footprint using `lod_quality`; beams apply an additional spacing factor. Before descending a branch (including the root), an LOD stop reads its stored summary through the child block’s owner-data index. The result is identical to tracing that node after its children are unloaded; it does not change the resident tree. With current binary summaries, mixed branches use a solid preview. Branch LOD stops do not emit split requests. Higher quality retains finer detail. There is no CPU distance cutoff or distance eviction.
+LOD is camera-dependent even for secondary rays. The test compares node size with projected pixel footprint using `lod_quality`; beams apply an additional spacing factor. Before descending a branch (including the root), an LOD stop reads its stored summary through the child block’s owner-data index. The result is identical to tracing that node after its children are unloaded; it does not change the resident tree. With current binary summaries, mixed branches use a solid preview. Branch LOD stops do not emit split requests. Higher quality retains finer detail. CPU residency follows the same radial criterion with a retention margin.
 
 Shadow and continuation rays restart with an empty traversal stack at the surface boundary, using a test point in the adjacent empty cell. Normals come from voxel faces. Collision detection is not implemented.
+
+## Shared LOD and residency policy
+
+`shaders/main.wgsl::lod_check` and `core::residency::Lod` must remain consistent. Let node size be `s`, its center be `c`, snapped camera position be `a = floor(camera) + 0.5`, Euclidean distance be `d = length(c - a)`, vertical FOV in radians be `f`, actual render-buffer height be `H`, and detail quality be `q`:
+
+`footprint = 2 * tan(f / 2) * d / H`
+
+GPU traversal requests finer detail exactly when `s > footprint / q`. Beam traversal additionally requires `s > footprint * beam_spacing`; residency uses the primary-ray rule, not the coarser beam rule. Distance is radial, not forward-axis depth, including for secondary rays. Rotation therefore does not change which nearby regions qualify for detail. The beam empty-space skip calculation separately uses projected depth; it is not a residency criterion.
+
+CPU unloading protects a branch while `1.5 * s > footprint / q`. This retains a band of extra detail beyond the GPU threshold, avoiding repeated unload/reload near the boundary and reducing sensitivity to CPU/GPU floating-point differences. There is no frustum or occlusion culling. Off-screen nodes satisfying the retention rule are assumed useful. Resolution and FOV changes affect both decisions; path tracing freezes residency. See [tree design](tree.md#bounded-cpu-unloading) for the rolling cursor and work bound.
 
 ## Refinement output contract
 

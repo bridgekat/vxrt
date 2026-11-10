@@ -1,7 +1,17 @@
 use vxrt::config::*;
 #[test]
 fn rejects_invalid_shader_parameters() {
+    assert_eq!(Config::default().max_unload_checks, 16384);
+    assert_eq!(Config::default().unloads_per_frame, 8192);
     for config in [
+        Config {
+            unloads_per_frame: 65537,
+            ..Default::default()
+        },
+        Config {
+            max_unload_checks: 65537,
+            ..Default::default()
+        },
         Config {
             max_split_requests: 0,
             ..Default::default()
@@ -50,6 +60,12 @@ fn rejects_invalid_shader_parameters() {
         assert!(config.validate().is_err());
     }
     Config::default().validate().unwrap();
+    Config {
+        max_unload_checks: 0,
+        ..Default::default()
+    }
+    .validate()
+    .unwrap();
     for levels in [1, 10, 11, 12] {
         let config: Config = toml::from_str(&format!("world_levels = {levels}")).unwrap();
         assert_eq!(config.world_levels, levels);

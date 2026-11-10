@@ -103,10 +103,11 @@ fn random_pair(dimension: u32) -> vec2<f32> {
     return vec2<f32>(random_dimension(dimension), random_dimension(dimension + 1u));
 }
 
+// Shared radial policy: src/core/residency.rs and docs/raycast.md.
 fn lod_check(level: u32, pos: vec3<u32>) -> bool {
     let rpos = (vec3<f32>(pos) + 0.5) * root_size / f32(1u << level) - lod_center;
     let size = root_size / f32(1u << level);
-    let real = tan(p.camera.w / 2.0) * dot(rpos, lod_dir) * 2.0 / f32(p.frame.y);
+    let real = tan(p.camera.w / 2.0) * length(rpos) * 2.0 / f32(p.frame.y);
     return size > real / p.lighting.x && (!beam_mode || size > real * f32(p.beam.w));
 }
 

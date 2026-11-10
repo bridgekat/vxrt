@@ -296,18 +296,30 @@ async fn check_streaming(adapter: &wgpu::Adapter) -> Result<()> {
         ensure!(r.check_tree()? == grown, "tree changed while accumulating");
     }
     let far = Vector3::new(4096., 4096., 4096.);
-    r.render(far, [0., 0.], false, false, 0, None)?;
-    r.read_frame()?;
+    for i in 0..32 {
+        r.render(far, [0., 0.], false, false, i, None)?;
+        r.read_frame()?;
+        r.check_tree()?;
+        let stats = r.streaming_stats();
+        ensure!(
+            stats.unload_checked <= Config::default().max_unload_checks as usize
+                && stats.unloaded <= Config::default().unloads_per_frame as usize
+                && stats.derefined <= stats.unload_checked
+        );
+    }
     ensure!(
-        r.check_tree()? == grown,
-        "moving away discarded resident detail"
+        r.check_tree()?.0 < grown.0,
+        "distant detail was not unloaded"
     );
     for i in 0..16 {
         r.render(camera, [-45., 0.], false, false, i, None)?;
         r.read_frame()?;
         r.check_tree()?;
     }
-    ensure!(r.check_tree()?.0 > 16, "resident detail was lost");
+    ensure!(
+        r.check_tree()?.0 > 16,
+        "returning to the scene did not reload detail"
+    );
     Ok(())
 }
 

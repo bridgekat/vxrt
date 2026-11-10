@@ -12,7 +12,7 @@ pub enum Node {
     Leaf(Handle),
 }
 impl Node {
-    pub fn word(self) -> u32 {
+    fn identity(self) -> u32 {
         match self {
             Self::Branch(h) => h.index << 2 | 1,
             Self::Leaf(h) => h.index << 2 | 3,
@@ -96,7 +96,17 @@ impl Tree {
         }
     }
     pub fn root(&self) -> u32 {
-        self.root.word()
+        self.descriptor(self.root)
+    }
+    /// Cache traversal flags beside the pointer, avoiding a dependent leaf-buffer read.
+    fn descriptor(&self, node: Node) -> u32 {
+        match node {
+            Node::Branch(h) => h.index << 4 | 1,
+            Node::Leaf(h) => {
+                let material = self.leaves.get(h).unwrap().material;
+                h.index << 4 | u32::from(material.mixed) << 3 | material.occupancy << 2 | 3
+            }
+        }
     }
     pub fn capacities(&self) -> [usize; 2] {
         [self.branches.capacity(), self.leaves.capacity()]
@@ -134,7 +144,7 @@ impl Tree {
     pub fn branch_words(&self, index: u32) -> [u32; 8] {
         self.branches
             .at(index)
-            .map(|(_, b)| b.children.map(Node::word))
+            .map(|(_, b)| b.children.map(|node| self.descriptor(node)))
             .unwrap_or([0; 8])
     }
     pub fn leaf_words(&self, index: u32) -> [u32; 4] {
@@ -285,7 +295,7 @@ impl Tree {
         let mut todo = vec![(self.root, None)];
         let mut seen = HashSet::new();
         while let Some((n, parent)) = todo.pop() {
-            ensure!(seen.insert(n.word()), "repeated tree reference");
+            ensure!(seen.insert(n.identity()), "repeated tree reference");
             let (region, actual_parent) = match n {
                 Node::Leaf(h) => {
                     let l = self

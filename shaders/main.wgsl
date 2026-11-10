@@ -28,8 +28,6 @@ var<storage, read_write> frame: array<vec4<f32>>;
 @group(0) @binding(3)
 var<storage, read_write> beams: array<f32>;
 
-@group(0) @binding(4)
-var<storage, read> leaves: array<vec4<u32>>;
 @group(0) @binding(5)
 var<storage, read_write> requests: array<atomic<u32>>;
 
@@ -154,13 +152,13 @@ fn cast_ray(reference: vec3<f32>, direction: vec3<f32>) -> f32 {
             data = bitcast<u32>(stack[stp].w);
         }
         let pos = vec3<u32>(test_point);
-        while data != 2u && (data & 3u) != 3u {
+        while (data & 3u) != 3u {
             if stp >= 20u {
                 return 1.0;
             }
             stack[stp] = vec4<f32>(box.xyz, bitcast<f32>(data));
             stp++;
-            var datap = (data >> 2u) * 8u;
+            var datap = (data >> 4u) * 8u;
             let mid = box.xyz + box.w / 2.0;
             if test_point.x >= mid.x {
                 datap += 1u;
@@ -178,18 +176,16 @@ fn cast_ray(reference: vec3<f32>, direction: vec3<f32>) -> f32 {
             data = branches[datap];
             if (data & 3u) != 3u && !lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
                 // Treat an LOD stop as a solid leaf.
-                data = 2u;
+                data = 7u;
             }
         }
-        var occupied = true;
-        if data != 2u {
-            let leaf = leaves[data >> 2u];
-            occupied = leaf.x != 0u;
-            if leaf.y != 0u && p.frame.z == 0u && lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
-                atomicOr(&requests[data >> 2u], 1u);
-            }
+        // Occupancy and deferred flags are cached in each descriptor. Material
+        // payloads remain in the leaf pool; traversal does not need to fetch them.
+        if (data & 8u) != 0u && p.frame.z == 0u && lod_check(stp, pos >> vec3<u32>(p.scene.x - stp)) {
+            let index = data >> 4u;
+            atomicOr(&requests[index >> 5u], 1u << (index & 31u));
         }
-        if occupied {
+        if (data & 4u) != 0u {
             return f32(i) / f32(p.scene.y);
         }
         let hit = inner_intersect(reference, dir, box);

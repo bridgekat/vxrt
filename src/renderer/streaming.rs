@@ -42,6 +42,7 @@ pub(super) struct Streaming {
     pub requests: wgpu::Buffer,
     scatter: wgpu::ComputePipeline,
     feedback: Option<Feedback>,
+    readback_spare: Option<wgpu::Buffer>,
     pub limit: usize,
     pub stats: StreamingStats,
 }
@@ -84,9 +85,10 @@ impl Streaming {
             tree,
             branches: storage(device, "branches", 16 * 32),
             leaves: storage(device, "leaves", 16 * 16),
-            requests: storage(device, "split requests", 16 * 4),
+            requests: storage(device, "split requests", 4),
             scatter,
             feedback: None,
+            readback_spare: None,
             limit,
             stats: StreamingStats::default(),
         }
@@ -96,7 +98,9 @@ impl Streaming {
             frame: self.stats.frame + 1,
             ..Default::default()
         };
-        device.poll(wgpu::PollType::Poll)?;
+        if self.feedback.is_some() {
+            device.poll(wgpu::PollType::Poll)?;
+        }
         let ready = match self.feedback.as_ref().map(|f| f.ready.try_recv()) {
             Some(Ok(result)) => {
                 result?;
@@ -117,8 +121,18 @@ impl Streaming {
                     .0
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, b)| {
-                        (u32::from_ne_bytes(*b) != 0).then_some(Handle { index: i as u32 })
+                    .flat_map(|(i, b)| {
+                        let mut bits = u32::from_ne_bytes(*b);
+                        std::iter::from_fn(move || {
+                            if bits == 0 {
+                                return None;
+                            }
+                            let bit = bits.trailing_zeros();
+                            bits &= bits - 1;
+                            Some(Handle {
+                                index: i as u32 * 32 + bit,
+                            })
+                        })
                     })
                     .collect();
                 self.stats.requested = requests.len();
@@ -145,6 +159,7 @@ impl Streaming {
                 }
             }
             feedback.buffer.unmap();
+            self.readback_spare = Some(feedback.buffer);
             self.tree.finish_feedback();
         }
         if self.stats.split > 0 {
@@ -214,7 +229,7 @@ impl Streaming {
             let groups = words[0].div_ceil(64);
             pass.dispatch_workgroups(groups.min(1024), groups.div_ceil(1024), 1);
         }
-        let size = capacities[1] as u64 * 4;
+        let size = capacities[1].div_ceil(32) as u64 * 4;
         if self.requests.size() != size {
             self.requests = storage(device, "grown split requests", size);
             resized = true;
@@ -232,12 +247,18 @@ impl Streaming {
         if self.feedback.is_some() {
             return None;
         }
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("split feedback readback"),
-            size: self.requests.size(),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let buffer = self
+            .readback_spare
+            .take()
+            .filter(|buffer| buffer.size() == self.requests.size())
+            .unwrap_or_else(|| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("split feedback readback"),
+                    size: self.requests.size(),
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                })
+            });
         encoder.copy_buffer_to_buffer(&self.requests, 0, &buffer, 0, buffer.size());
         self.tree.begin_feedback();
         let (tx, rx) = mpsc::channel();
@@ -251,6 +272,7 @@ impl Streaming {
     pub fn replace(&mut self, tree: Tree) {
         self.tree = tree;
         self.feedback = None;
+        self.readback_spare = None;
     }
     pub fn feedback_pending(&self) -> bool {
         self.feedback.is_some()

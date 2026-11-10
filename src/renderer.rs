@@ -221,10 +221,6 @@ impl Renderer {
                             resource: beams.as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: streaming.leaves.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
                             binding: 5,
                             resource: streaming.requests.as_entire_binding(),
                         },

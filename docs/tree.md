@@ -41,9 +41,11 @@ Branches and leaves use separate pools so growing leaf material data does not in
 | --- | --- | --- |
 | Branch | 32 bytes | Eight 32-bit child descriptors |
 | Leaf | 16 bytes | Occupancy, deferred-detail flag, two reserved words |
-| Request | 4 bytes per leaf slot | Atomic boolean refinement flag |
+| Requests | 4 bytes per 32 leaf slots, rounded up | Atomic refinement bitset |
 
-Descriptors store the pool index in the upper bits and a tag in the low two bits: branch `1`, leaf `3`. The root descriptor is passed through the scene uniform. GPU pools have no packed-tree header. CPU records additionally retain spatial regions and parent links; these are not uploaded.
+Descriptors store the pool index in bits 4–31 and a tag in bits 0–1: branch `1`, leaf `3`. Leaf descriptors also cache occupancy in bit 2 and deferred status in bit 3. Traversal can test these without a dependent leaf-buffer read; the separate leaf pool retains material records for future shading. Any operation changing these flags must also patch the parent descriptor, or the root uniform. Current operations replace leaves rather than edit their material in place.
+
+The root descriptor is passed through the scene uniform. GPU pools have no packed-tree header. CPU records additionally retain spatial regions and parent links; these are not uploaded. The runtime descriptor encoding is distinct from the packed import format.
 
 Each pool begins with 16 slots. Allocation reuses freelist entries; when none remain, capacity doubles within a limit derived from adapter buffer limits. Live slots never move during growth or merging. Freeing a slot makes it reusable without shifting other allocations, so external fragmentation does not require compaction. Reserved capacity remains allocated after merging; unused capacity and CPU metadata still consume memory.
 
@@ -94,11 +96,11 @@ Copies and separate compute passes are ordered through wgpu command submission. 
 
 Each nonempty pool update is one contiguous buffer containing a record count, record stride, and `(slot_index, complete_slot_data)` records. One compute invocation writes one destination slot. Unique indices eliminate overlapping writes and destination atomics. Pool growth copies the old GPU buffer before applying patches; unchanged records are not re-uploaded from the CPU.
 
-Scatter uploads reduce many small upload calls at the cost of an extra dispatch and an index per record. Their performance advantage is workload-dependent and has not been established by a benchmark. Dense updates may favor contiguous range writes. The implementation currently allocates staging buffers per nonempty batch and a readback buffer per capture; reuse is a possible optimization.
+Scatter uploads reduce many small upload calls at the cost of an extra dispatch and an index per record. Their performance advantage is workload-dependent and has not been established by a benchmark. Dense updates may favor contiguous range writes. Staging buffers are allocated per nonempty upload batch. The feedback readback buffer is reused after unmapping, and replaced when request capacity changes.
 
 ## Refinement demand and residency
 
-Interactive rays atomically mark deferred leaves when the screen-space LOD test requires finer geometry. Multiple rays requesting the same leaf produce one flag. There is no CPU distance cutoff: distance alone must not reject detail that the renderer still asks for.
+Interactive rays atomically mark deferred leaves when the screen-space LOD test requires finer geometry. Leaf index `i` sets bit `i & 31` in request word `i >> 5` using atomic OR. Multiple rays requesting the same leaf produce one flag; different leaves sharing a word retain independent flags. CPU decoding visits set bits and reports unique leaf counts, not nonzero-word counts. The bitset reduces clearing, copying, and scanning by up to 32× compared with one word per leaf. There is no CPU distance cutoff: distance alone must not reject detail that the renderer still asks for.
 
 The `splits_per_frame` setting in `config.toml` limits successful CPU splits per frame receiving feedback (default 1,024; range 1–4,096). Larger budgets load detail in fewer frames but can increase CPU frame time. This is a split budget, not an upload-record limit: a split creates one branch and eight leaves and may patch its parent.
 

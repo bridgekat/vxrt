@@ -25,6 +25,7 @@ The `core` module contains CPU algorithms and has no dependency on windowing or 
 | `shaders/present.wgsl` | Fullscreen presentation and gamma encoding |
 | `tests/{terrain,node,pool,tree,packed,config,shaders}.rs` | CPU algorithms, settings, and shader validation |
 | `tests/smoke.rs` | GPU execution, convergence, reference-image comparisons, and overlay previews |
+| `tests/performance.rs` | Opt-in steady-state throughput benchmark with optional overlay |
 | `tests/support/sampling.rs`, `tests/support/sampling.wgsl` | GPU sampling diagnostics against analytic integrals |
 
 `Tree` is the runtime representation. The packed scene format is only an input/reference encoding, not a second runtime tree implementation. It has a node-count header followed by tagged words: branch words point to eight contiguous packed children, and leaf words contain occupancy 0 or 1. Import validates pointers, depth, tags, and occupancy, ignores unreachable storage, and constructs the runtime pools. Exact merging always uses `Tree::compact` and the local compatibility rule in `node.rs`.
@@ -34,6 +35,8 @@ The `core` module contains CPU algorithms and has no dependency on windowing or 
 The CPU owns a sparse voxel tree backed by separate branch and leaf pools. Interactive rays request refinement from baked height bounds; the CPU splits and merges nodes, then uploads changed slots through scatter writes. Generated detail remains resident, and path tracing freezes topology. Deferred leaves render as coarse solid previews.
 
 See [sparse voxel tree design](tree.md) for data layouts, local operations, allocation, GPU-visible snapshot invariants, command ordering, feedback counters, and residency policy.
+
+See [performance measurement](performance.md) for benchmark methodology, measured steady-state throughput, and profiling priorities.
 
 ## Interactive rendering
 

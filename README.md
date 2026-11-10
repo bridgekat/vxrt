@@ -84,3 +84,5 @@ To isolate sun illumination, set `sky_intensity = 0.0` in `config.toml` and ente
 CPU terrain and tree algorithms live in `src/core/`; GPU streaming and rendering live in `src/renderer.rs` and `src/renderer/`. The packed scene format is an import/reference representation, separate from the runtime pools.
 
 See [sparse voxel tree design](docs/tree.md) for CPU/GPU ownership, allocation, refinement, and synchronization. See [rendering architecture and development priorities](docs/rendering.md) for traversal, lighting, sampling, and limitations.
+
+See [performance measurement](docs/performance.md) for the opt-in steady-state benchmark, measured results, and profiling priorities.
